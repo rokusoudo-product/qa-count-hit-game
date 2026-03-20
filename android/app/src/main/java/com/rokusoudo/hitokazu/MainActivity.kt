@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.rokusoudo.hitokazu.data.model.GamePhase
 import com.rokusoudo.hitokazu.ui.screens.*
 import com.rokusoudo.hitokazu.ui.theme.HitokazuTheme
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
@@ -76,18 +77,49 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                         }
-                        // Sprint 4で実装
                         composable(Routes.ANSWERING) {
-                            PlaceholderScreen("回答フェーズ (Sprint 4)")
+                            AnsweringScreen(
+                                viewModel = gameViewModel,
+                                onPredicting = { navController.navigate(Routes.PREDICTING) },
+                            )
                         }
                         composable(Routes.PREDICTING) {
-                            PlaceholderScreen("予測フェーズ (Sprint 4)")
+                            PredictingScreen(
+                                viewModel = gameViewModel,
+                                onResult = { navController.navigate(Routes.RESULT) },
+                            )
                         }
                         composable(Routes.RESULT) {
-                            PlaceholderScreen("結果フェーズ (Sprint 4)")
+                            ResultScreen(
+                                viewModel = gameViewModel,
+                                onNextRound = {
+                                    navController.navigate(Routes.ANSWERING) {
+                                        popUpTo(Routes.ANSWERING) { inclusive = true }
+                                    }
+                                },
+                                onFinished = {
+                                    navController.navigate(Routes.FINISHED) {
+                                        popUpTo(Routes.HOME)
+                                    }
+                                },
+                            )
                         }
                         composable(Routes.FINISHED) {
-                            PlaceholderScreen("ゲーム終了 (Sprint 4)")
+                            FinishedScreen(
+                                viewModel = gameViewModel,
+                                onRestart = {
+                                    gameViewModel.resetGame()
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
+                                onHome = {
+                                    gameViewModel.resetGame()
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
+                            )
                         }
                     }
                 }

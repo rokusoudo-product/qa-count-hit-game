@@ -208,6 +208,18 @@ class GameViewModel : ViewModel() {
         }
     }
 
+    fun reconnect() {
+        val roomId = _uiState.value.roomId
+        if (roomId.isNotEmpty()) {
+            wsManager.connect(roomId)
+        }
+    }
+
+    fun resetGame() {
+        wsManager.disconnect()
+        _uiState.value = GameUiState()
+    }
+
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
     override fun onCleared() {
