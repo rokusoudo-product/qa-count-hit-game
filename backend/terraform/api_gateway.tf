@@ -81,6 +81,94 @@ resource "aws_lambda_permission" "join_room" {
   source_arn    = "${aws_apigatewayv2_api.rest.execution_arn}/*/*"
 }
 
+# GET /questions
+resource "aws_apigatewayv2_integration" "preset_questions" {
+  api_id                 = aws_apigatewayv2_api.rest.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.preset_questions.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "preset_questions" {
+  api_id    = aws_apigatewayv2_api.rest.id
+  route_key = "GET /questions"
+  target    = "integrations/${aws_apigatewayv2_integration.preset_questions.id}"
+}
+
+resource "aws_lambda_permission" "preset_questions" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.preset_questions.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.rest.execution_arn}/*/*"
+}
+
+# POST /rooms/{roomId}/start
+resource "aws_apigatewayv2_integration" "start_game" {
+  api_id                 = aws_apigatewayv2_api.rest.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.start_game.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "start_game" {
+  api_id    = aws_apigatewayv2_api.rest.id
+  route_key = "POST /rooms/{roomId}/start"
+  target    = "integrations/${aws_apigatewayv2_integration.start_game.id}"
+}
+
+resource "aws_lambda_permission" "start_game" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.start_game.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.rest.execution_arn}/*/*"
+}
+
+# POST /rooms/{roomId}/answer
+resource "aws_apigatewayv2_integration" "submit_answer" {
+  api_id                 = aws_apigatewayv2_api.rest.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.submit_answer.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "submit_answer" {
+  api_id    = aws_apigatewayv2_api.rest.id
+  route_key = "POST /rooms/{roomId}/answer"
+  target    = "integrations/${aws_apigatewayv2_integration.submit_answer.id}"
+}
+
+resource "aws_lambda_permission" "submit_answer" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.submit_answer.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.rest.execution_arn}/*/*"
+}
+
+# POST /rooms/{roomId}/prediction
+resource "aws_apigatewayv2_integration" "submit_prediction" {
+  api_id                 = aws_apigatewayv2_api.rest.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.submit_prediction.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "submit_prediction" {
+  api_id    = aws_apigatewayv2_api.rest.id
+  route_key = "POST /rooms/{roomId}/prediction"
+  target    = "integrations/${aws_apigatewayv2_integration.submit_prediction.id}"
+}
+
+resource "aws_lambda_permission" "submit_prediction" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.submit_prediction.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.rest.execution_arn}/*/*"
+}
+
 # ── WebSocket API ─────────────────────────────────────────────
 resource "aws_apigatewayv2_api" "websocket" {
   name                       = "${local.prefix}-ws"

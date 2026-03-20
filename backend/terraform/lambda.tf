@@ -99,3 +99,84 @@ resource "aws_lambda_layer_version" "qrcode_layer" {
   compatible_runtimes = ["python3.11"]
   description         = "qrcode + Pillow libraries"
 }
+
+# ── Sprint 2: Game Logic ──────────────────────────────────────
+data "archive_file" "preset_questions" {
+  type        = "zip"
+  source_file = "${path.module}/../lambda/questions/preset_questions.py"
+  output_path = "${path.module}/.build/preset_questions.zip"
+}
+
+data "archive_file" "start_game" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/game"
+  output_path = "${path.module}/.build/start_game.zip"
+}
+
+data "archive_file" "submit_answer" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/game"
+  output_path = "${path.module}/.build/submit_answer.zip"
+}
+
+data "archive_file" "submit_prediction" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/game"
+  output_path = "${path.module}/.build/submit_prediction.zip"
+}
+
+data "archive_file" "phase_timeout" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/game"
+  output_path = "${path.module}/.build/phase_timeout.zip"
+}
+
+resource "aws_lambda_function" "preset_questions" {
+  function_name    = "${local.prefix}-preset-questions"
+  filename         = data.archive_file.preset_questions.output_path
+  source_code_hash = data.archive_file.preset_questions.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "preset_questions.handler"
+  runtime          = "python3.11"
+  environment { variables = local.lambda_env }
+}
+
+resource "aws_lambda_function" "start_game" {
+  function_name    = "${local.prefix}-start-game"
+  filename         = data.archive_file.start_game.output_path
+  source_code_hash = data.archive_file.start_game.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "start_game.handler"
+  runtime          = "python3.11"
+  environment { variables = local.lambda_env }
+}
+
+resource "aws_lambda_function" "submit_answer" {
+  function_name    = "${local.prefix}-submit-answer"
+  filename         = data.archive_file.submit_answer.output_path
+  source_code_hash = data.archive_file.submit_answer.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "submit_answer.handler"
+  runtime          = "python3.11"
+  environment { variables = local.lambda_env }
+}
+
+resource "aws_lambda_function" "submit_prediction" {
+  function_name    = "${local.prefix}-submit-prediction"
+  filename         = data.archive_file.submit_prediction.output_path
+  source_code_hash = data.archive_file.submit_prediction.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "submit_prediction.handler"
+  runtime          = "python3.11"
+  environment { variables = local.lambda_env }
+}
+
+resource "aws_lambda_function" "phase_timeout" {
+  function_name    = "${local.prefix}-phase-timeout"
+  filename         = data.archive_file.phase_timeout.output_path
+  source_code_hash = data.archive_file.phase_timeout.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "phase_timeout.handler"
+  runtime          = "python3.11"
+  environment { variables = local.lambda_env }
+}
