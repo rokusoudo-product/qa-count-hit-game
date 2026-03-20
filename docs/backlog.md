@@ -11,12 +11,12 @@
 
 | ID | タスク | 優先度 | ストーリー | ステータス |
 |----|--------|--------|-----------|-----------|
-| BE-001 | DynamoDB テーブル設計・作成（Rooms/Players/Answers/Scores） | 🔴 | - | 未着手 |
-| BE-002 | Terraform: Lambda + API Gateway (WebSocket) 基盤構築 | 🔴 | - | 未着手 |
-| BE-003 | WebSocket接続ハンドラ（$connect / $disconnect） | 🔴 | US-004 | 未着手 |
-| BE-004 | ルーム作成API（POST /rooms） | 🔴 | US-001 | 未着手 |
-| BE-005 | QRコード生成API（GET /rooms/{roomId}/qr） | 🔴 | US-001 | 未着手 |
-| BE-006 | ルーム参加API（POST /rooms/{roomId}/join） | 🔴 | US-004 | 未着手 |
+| BE-001 | DynamoDB テーブル設計・作成（Rooms/Players/Answers/Scores） | 🔴 | - | 完了 |
+| BE-002 | Terraform: Lambda + API Gateway (WebSocket) 基盤構築 | 🔴 | - | 完了 |
+| BE-003 | WebSocket接続ハンドラ（$connect / $disconnect） | 🔴 | US-004 | 完了 |
+| BE-004 | ルーム作成API（POST /rooms） | 🔴 | US-001 | 完了 |
+| BE-005 | QRコード生成API（GET /rooms/{roomId}/qr） | 🔴 | US-001 | 完了 |
+| BE-006 | ルーム参加API（POST /rooms/{roomId}/join） | 🔴 | US-004 | 完了 |
 
 ---
 
