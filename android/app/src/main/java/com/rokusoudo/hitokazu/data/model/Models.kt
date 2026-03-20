@@ -1,92 +1,93 @@
 package com.rokusoudo.hitokazu.data.model
 
-import com.squareup.moshi.Json
-import com.squareup.moshi.JsonClass
+// ── API Response Models ───────────────────────────────────────
 
-// ── REST Response Models ──────────────────────────────────────
-
-@JsonClass(generateAdapter = true)
-data class CreateRoomResponse(
-    @Json(name = "roomId") val roomId: String
-)
-
-@JsonClass(generateAdapter = true)
-data class QrResponse(
-    @Json(name = "roomId") val roomId: String,
-    @Json(name = "qrCode") val qrCode: String,   // base64 PNG
-    @Json(name = "format") val format: String
-)
-
-@JsonClass(generateAdapter = true)
-data class JoinRoomRequest(
-    @Json(name = "nickname") val nickname: String
-)
-
-@JsonClass(generateAdapter = true)
 data class JoinRoomResponse(
-    @Json(name = "playerId") val playerId: String,
-    @Json(name = "roomId") val roomId: String,
-    @Json(name = "nickname") val nickname: String
+    val playerId: String,
+    val roomId: String,
+    val nickname: String,
 )
 
-@JsonClass(generateAdapter = true)
 data class Question(
-    @Json(name = "questionId") val questionId: String,
-    @Json(name = "text") val text: String,
-    @Json(name = "options") val options: List<String>,
-    @Json(name = "answerSeconds") val answerSeconds: Int,
-    @Json(name = "predictSeconds") val predictSeconds: Int
+    val questionId: String,
+    val text: String,
+    val options: List<String>,
+    val answerSeconds: Int,
+    val predictSeconds: Int,
 )
 
-@JsonClass(generateAdapter = true)
-data class SubmitAnswerRequest(
-    @Json(name = "playerId") val playerId: String,
-    @Json(name = "answer") val answer: String
-)
-
-@JsonClass(generateAdapter = true)
-data class SubmitPredictionRequest(
-    @Json(name = "playerId") val playerId: String,
-    @Json(name = "targetOption") val targetOption: String,
-    @Json(name = "predictedCount") val predictedCount: Int
-)
-
-// ── WebSocket Event Models ────────────────────────────────────
-
-@JsonClass(generateAdapter = true)
-data class WsEvent(
-    @Json(name = "action") val action: String,
-    @Json(name = "round") val round: Int? = null,
-    @Json(name = "totalRounds") val totalRounds: Int? = null,
-    @Json(name = "question") val question: Question? = null,
-    @Json(name = "answerCounts") val answerCounts: Map<String, Int>? = null,
-    @Json(name = "scores") val scores: List<PlayerScore>? = null,
-    @Json(name = "finalScores") val finalScores: List<PlayerScore>? = null,
-    @Json(name = "nextRound") val nextRound: Int? = null,
-    @Json(name = "nextQuestion") val nextQuestion: Question? = null,
-    @Json(name = "playerId") val playerId: String? = null,
-    @Json(name = "nickname") val nickname: String? = null,
-    @Json(name = "totalPlayers") val totalPlayers: Int? = null,
-    @Json(name = "timedOut") val timedOut: Boolean? = null
-)
-
-@JsonClass(generateAdapter = true)
 data class PlayerScore(
-    @Json(name = "playerId") val playerId: String,
-    @Json(name = "targetOption") val targetOption: String,
-    @Json(name = "predictedCount") val predictedCount: Int,
-    @Json(name = "actualCount") val actualCount: Int,
-    @Json(name = "roundScore") val roundScore: Int
+    val playerId: String,
+    val targetOption: String,
+    val predictedCount: Int,
+    val actualCount: Int,
+    val roundScore: Int,
 )
 
-// ── UI State ──────────────────────────────────────────────────
+// ── UI State Models ───────────────────────────────────────────
 
 data class Player(
     val playerId: String,
     val nickname: String,
-    val isHost: Boolean = false
+    val isHost: Boolean = false,
 )
 
 enum class GamePhase {
     WAITING, ANSWERING, PREDICTING, RESULT, FINISHED
+}
+
+// ── Firestore Snapshot ────────────────────────────────────────
+
+data class RoomSnapshot(
+    val status: GamePhase,
+    val currentRound: Int,
+    val totalRounds: Int,
+    val currentQuestion: Question?,
+    val answerCounts: Map<String, Int>,
+    val roundScores: List<PlayerScore>,
+    val finalScores: List<PlayerScore>,
+) {
+    companion object {
+        @Suppress("UNCHECKED_CAST")
+        fun fromMap(data: Map<String, Any>): RoomSnapshot {
+            val statusStr = data["status"] as? String ?: "WAITING"
+            val phase = runCatching { GamePhase.valueOf(statusStr) }.getOrDefault(GamePhase.WAITING)
+
+            val qMap = data["currentQuestion"] as? Map<String, Any>
+            val question = qMap?.let {
+                Question(
+                    questionId = it["questionId"] as? String ?: "",
+                    text = it["text"] as? String ?: "",
+                    options = (it["options"] as? List<String>) ?: emptyList(),
+                    answerSeconds = (it["answerSeconds"] as? Long)?.toInt() ?: 30,
+                    predictSeconds = (it["predictSeconds"] as? Long)?.toInt() ?: 20,
+                )
+            }
+
+            val counts = (data["answerCounts"] as? Map<String, Any>)
+                ?.mapValues { (it.value as? Long)?.toInt() ?: 0 }
+                ?: emptyMap()
+
+            fun parseScores(key: String): List<PlayerScore> =
+                (data[key] as? List<Map<String, Any>>)?.map { s ->
+                    PlayerScore(
+                        playerId = s["playerId"] as? String ?: "",
+                        targetOption = s["targetOption"] as? String ?: "",
+                        predictedCount = (s["predictedCount"] as? Long)?.toInt() ?: 0,
+                        actualCount = (s["actualCount"] as? Long)?.toInt() ?: 0,
+                        roundScore = (s["roundScore"] as? Long)?.toInt() ?: 0,
+                    )
+                } ?: emptyList()
+
+            return RoomSnapshot(
+                status = phase,
+                currentRound = (data["currentRound"] as? Long)?.toInt() ?: 0,
+                totalRounds = (data["totalRounds"] as? Long)?.toInt() ?: 5,
+                currentQuestion = question,
+                answerCounts = counts,
+                roundScores = parseScores("roundScores"),
+                finalScores = parseScores("finalScores"),
+            )
+        }
+    }
 }

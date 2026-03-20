@@ -1,7 +1,8 @@
 # システムアーキテクチャ概要
 
 **作成日**: 2026-03-20
-**バージョン**: 1.0
+**最終更新**: 2026-03-20（AWS → Firebase移行）
+**バージョン**: 2.0
 
 ---
 
@@ -10,62 +11,66 @@
 ```
 [Android App]
      │
-     ├── REST API (HTTPS)
-     │       └── API Gateway (REST) → Lambda → DynamoDB
+     ├── Callable Functions (HTTPS)
+     │       └── Firebase Cloud Functions (Python 3.12)
+     │                └── Firestore（読み書き）
      │
-     └── WebSocket (WSS)
-             └── API Gateway (WebSocket) → Lambda → DynamoDB
-                                                 └── (broadcast) → 全接続クライアント
+     └── Firestore Real-time Listener
+             └── Firestore → onSnapshot → UI更新
+                 （WebSocket不要・自動再接続）
 ```
 
 ---
 
-## AWS構成
+## Firebase構成
 
 | コンポーネント | サービス | 用途 |
 |--------------|---------|------|
-| REST API | API Gateway + Lambda | ルーム作成、QR生成、回答送信等 |
-| WebSocket | API Gateway WebSocket + Lambda | リアルタイム状態同期 |
-| DB | DynamoDB | ルーム・プレイヤー・回答・スコア管理 |
-| QR生成 | Lambda（qrcode ライブラリ） | QRコード画像生成 |
-| IaC | Terraform | インフラ構築・管理 |
+| リアルタイムDB | Cloud Firestore | ゲーム状態・プレイヤー・回答管理 |
+| サーバーレス関数 | Cloud Functions (Python 3.12) | ゲームロジック・採点 |
+| リアルタイム通信 | Firestoreリスナー | WebSocket代替・自動再接続 |
+| Android SDK | Firebase SDK for Android | Firestore + Functions クライアント |
 
 ---
 
-## DynamoDB テーブル設計（案）
+## Firestore データ構造
 
-### Rooms テーブル
-| PK | SK | Attributes |
-|----|----|-----------|
-| roomId | "ROOM" | hostConnectionId, status, createdAt, TTL |
+```
+rooms/{roomId}
+  ├── hostName: string
+  ├── status: "WAITING" | "ANSWERING" | "PREDICTING" | "RESULT" | "FINISHED"
+  ├── currentRound: number
+  ├── totalRounds: number
+  ├── currentQuestion: { questionId, text, options, answerSeconds, predictSeconds }
+  ├── answerCounts: { "選択肢A": 3, "選択肢B": 2 }
+  ├── roundScores: [PlayerScore]
+  ├── finalScores: [PlayerScore]
+  └── createdAt: timestamp
 
-### Players テーブル
-| PK | SK | Attributes |
-|----|----|-----------|
-| roomId | playerId | nickname, connectionId, isHost, joinedAt |
+rooms/{roomId}/players/{playerId}
+  ├── nickname: string
+  ├── isHost: boolean
+  └── joinedAt: timestamp
 
-### Answers テーブル
-| PK | SK | Attributes |
-|----|----|-----------|
-| roomId#round | playerId | answer, prediction, score, answeredAt |
+rooms/{roomId}/rounds/{round}/answers/{playerId}
+  ├── answer: string
+  ├── prediction: number
+  ├── targetOption: string
+  ├── roundScore: number
+  └── answeredAt: timestamp
+```
 
 ---
 
-## WebSocketイベント一覧
+## Cloud Functions 一覧
 
-| イベント | 方向 | 説明 |
-|---------|------|------|
-| $connect | Client→Server | 接続確立 |
-| $disconnect | Client→Server | 接続切断 |
-| joinRoom | Client→Server | ルーム参加 |
-| playerJoined | Server→Client | 参加者追加通知（全員に） |
-| gameStarted | Server→Client | ゲーム開始（全員に） |
-| questionRevealed | Server→Client | 質問配信（全員に） |
-| answerSubmitted | Client→Server | 回答送信 |
-| allAnswered | Server→Client | 全員回答完了通知 |
-| predictionSubmitted | Client→Server | 予測送信 |
-| roundResult | Server→Client | ラウンド結果配信（全員に） |
-| gameEnded | Server→Client | ゲーム終了・最終結果（全員に） |
+| 関数名 | トリガー | 説明 |
+|--------|---------|------|
+| `create_room` | Callable | ルームID生成・Firestore保存 |
+| `join_room` | Callable | プレイヤー参加・バリデーション |
+| `start_game` | Callable | ゲーム開始・最初の質問セット |
+| `submit_answer` | Callable | 回答保存・全員完了で予測フェーズ移行 |
+| `submit_prediction` | Callable | 予測保存・採点・次ラウンド/終了 |
 
 ---
 
@@ -75,22 +80,32 @@
 WAITING（待合室）
   ↓ ホストがゲーム開始
 ANSWERING（回答フェーズ：30秒）
-  ↓ 全員回答 or タイムアウト
+  ↓ 全員回答完了
 PREDICTING（予測フェーズ：20秒）
-  ↓ 全員予測 or タイムアウト
+  ↓ 全員予測完了
 RESULT（結果表示：10秒）
   ↓ 次のラウンドへ or ゲーム終了
 FINISHED（最終結果）
 ```
 
+**状態変更はFirestoreドキュメントの更新で行い、
+AndroidはonSnapshotリスナーで自動検知・UI更新する。**
+
 ---
 
-## スコア計算式（案）
+## スコア計算式
 
 ```
 差分 = |予測値 - 実際の人数|
 スコア = max(0, 100 - 差分 × 20)
 ```
 
-例：実際5人、予測4人 → 差分1 → 80点
-例：実際5人、予測5人 → 差分0 → 100点（パーフェクト）
+---
+
+## AWSからの移行メモ
+
+旧AWS実装は `archive/` ディレクトリに保存済み。
+- WebSocket API Gateway → Firestoreリアルタイムリスナー
+- Lambda → Cloud Functions
+- DynamoDB → Cloud Firestore
+- Terraform → Firebase CLI
