@@ -11,6 +11,8 @@ backend/terraform.tfvars
 *_credentials*
 secrets.json
 config.json
+serviceAccountKey.json
+*serviceAccount*.json
 
 # Python
 __pycache__/
