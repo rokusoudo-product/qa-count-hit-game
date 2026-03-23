@@ -1,0 +1,3 @@
+functions/venv/
+functions/__pycache__/
+functions/*.pyc

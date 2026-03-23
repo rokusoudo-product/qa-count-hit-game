@@ -1,7 +1,13 @@
 {
   "functions": {
     "source": "functions",
-    "runtime": "python312"
+    "runtime": "python312",
+    "ignore": [
+      "venv",
+      "__pycache__",
+      "*.pyc",
+      ".env"
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",

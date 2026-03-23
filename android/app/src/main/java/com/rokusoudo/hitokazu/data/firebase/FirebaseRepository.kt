@@ -12,7 +12,7 @@ import kotlinx.coroutines.tasks.await
 class FirebaseRepository {
 
     private val db = Firebase.firestore
-    private val functions = Firebase.functions("asia-northeast1")
+    private val functions = Firebase.functions("us-central1")
 
     // ── ルーム作成 ──────────────────────────────────────────
     suspend fun createRoom(hostName: String): Result<String> = runCatching {

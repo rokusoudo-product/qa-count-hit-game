@@ -9,7 +9,7 @@ from firebase_functions import https_fn, options
 
 initialize_app()
 
-REGION = options.SupportedRegion.ASIA_NORTHEAST1
+REGION = options.SupportedRegion.US_CENTRAL1
 
 QUESTIONS = [
     {
