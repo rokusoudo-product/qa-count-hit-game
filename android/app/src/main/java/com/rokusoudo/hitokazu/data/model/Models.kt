@@ -18,6 +18,7 @@ data class Question(
 
 data class PlayerScore(
     val playerId: String,
+    val nickname: String = "",
     val targetOption: String,
     val predictedCount: Int,
     val actualCount: Int,
@@ -72,6 +73,7 @@ data class RoomSnapshot(
                 (data[key] as? List<Map<String, Any>>)?.map { s ->
                     PlayerScore(
                         playerId = s["playerId"] as? String ?: "",
+                        nickname = s["nickname"] as? String ?: "",
                         targetOption = s["targetOption"] as? String ?: "",
                         predictedCount = (s["predictedCount"] as? Long)?.toInt() ?: 0,
                         actualCount = (s["actualCount"] as? Long)?.toInt() ?: 0,

@@ -25,7 +25,7 @@ fun PredictingScreen(
     val question = uiState.currentQuestion
     val totalPlayers = uiState.players.size
 
-    var selectedOption by remember { mutableStateOf(question?.options?.firstOrNull() ?: "") }
+    val selectedOption = "はい"
     var predictedCountStr by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
 
@@ -35,7 +35,7 @@ fun PredictingScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ConnectionBanner(
-            wsState = uiState.wsState,
+            isDisconnected = false,
             onReconnect = { viewModel.reconnect() },
         )
 
@@ -71,27 +71,8 @@ fun PredictingScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 選択肢タブ
-            question?.options?.let { options ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    options.forEach { option ->
-                        FilterChip(
-                            selected = selectedOption == option,
-                            onClick = { if (!submitted) selectedOption = option },
-                            label = { Text(option) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
             Text(
-                text = "「$selectedOption」を選んだ人数は？",
+                text = "「はい」を選んだ人数は？",
                 fontSize = 18.sp,
                 textAlign = TextAlign.Center,
             )
@@ -166,7 +147,7 @@ fun PredictingScreen(
                 }
             } else {
                 Text(
-                    text = "「$selectedOption が ${predictedCountStr}人」で予測済み\n結果を待っています...",
+                    text = "「はい が ${predictedCountStr}人」で予測済み\n結果を待っています...",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                 )

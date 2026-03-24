@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>人数当てゲーム</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    h1 { font-size: 22px; text-align: center; margin-bottom: 24px; color: #333; }
+    h2 { font-size: 18px; margin-bottom: 16px; color: #333; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: opacity 0.2s;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #6200ea; color: white; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-answer { background: #1976d2; color: white; font-size: 18px; padding: 18px; }
+    .btn-answer.selected { background: #0d47a1; border: 3px solid #82b1ff; }
+    .error { color: #d32f2f; font-size: 14px; margin-bottom: 8px; padding: 8px; background: #ffebee; border-radius: 8px; }
+    .info { color: #555; font-size: 14px; margin-bottom: 16px; }
+    .player-list { list-style: none; }
+    .player-list li { padding: 10px; border-bottom: 1px solid #eee; font-size: 15px; }
+    .player-list li:last-child { border-bottom: none; }
+    .badge { display: inline-block; background: #6200ea; color: white; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+    .question-card {
+      background: #ede7f6;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .question-text { font-size: 20px; font-weight: bold; color: #311b92; }
+    .round-info { font-size: 13px; color: #777; margin-bottom: 8px; }
+    .count-bar {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .count-bar span { width: 120px; font-size: 15px; }
+    .count-bar .bar-wrap { flex: 1; background: #eee; border-radius: 4px; height: 12px; margin: 0 8px; }
+    .count-bar .bar { background: #6200ea; height: 12px; border-radius: 4px; transition: width 0.5s; }
+    .count-bar .num { font-weight: bold; font-size: 15px; color: #6200ea; }
+    .score-card { background: #f3e5f5; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #e1bee7; }
+    .score-row:last-child { border-bottom: none; }
+    .rank { font-size: 20px; width: 36px; }
+    .score-pts { font-weight: bold; color: #6200ea; }
+    .waiting-count { font-size: 14px; color: #888; text-align: center; margin-top: 8px; }
+    .predict-input { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+    .predict-input input { margin-bottom: 0; }
+    .sent-msg { text-align: center; color: #388e3c; font-size: 15px; padding: 16px; }
+    .spinner { text-align: center; color: #888; padding: 20px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>人数当てゲーム</h1>
+
+  <!-- ホーム画面 -->
+  <div id="screen-home" class="screen active">
+    <div id="home-error" class="error" style="display:none"></div>
+    <input id="nickname" type="text" placeholder="ニックネーム" maxlength="20">
+    <input id="room-id-input" type="text" placeholder="ルームID（参加する場合）" maxlength="10" style="text-transform:uppercase">
+    <button class="btn-primary" onclick="joinRoom()">参加する</button>
+    <p style="text-align:center;color:#aaa;margin:8px 0">または</p>
+    <button class="btn-secondary" onclick="goToCreate()">新しくルームを作る（ホスト）</button>
+  </div>
+
+  <!-- ルーム作成画面 -->
+  <div id="screen-create" class="screen">
+    <div id="create-error" class="error" style="display:none"></div>
+    <input id="host-name" type="text" placeholder="ホスト名" maxlength="20">
+    <button class="btn-primary" onclick="createRoom()">ルームを作成</button>
+    <button class="btn-secondary" onclick="showScreen('home')">戻る</button>
+  </div>
+
+  <!-- 待機室 -->
+  <div id="screen-waiting" class="screen">
+    <h2>待機中</h2>
+    <p class="info">ルームID: <strong id="display-room-id"></strong></p>
+    <p class="info">参加者</p>
+    <ul class="player-list" id="player-list"></ul>
+    <div id="host-controls" style="display:none;margin-top:16px">
+      <p class="waiting-count" id="player-count-msg"></p>
+      <button class="btn-primary" id="start-btn" onclick="startGame()" disabled>ゲームを開始する</button>
+    </div>
+    <p class="waiting-count" id="guest-waiting-msg" style="display:none">ホストがゲームを開始するまでお待ちください</p>
+  </div>
+
+  <!-- 回答画面 -->
+  <div id="screen-answering" class="screen">
+    <div class="round-info" id="answer-round"></div>
+    <div class="question-card">
+      <div class="question-text" id="answer-question"></div>
+    </div>
+    <div id="answer-buttons"></div>
+    <div id="answer-sent" class="sent-msg" style="display:none">✓ 回答を送信しました。全員の回答を待っています...</div>
+  </div>
+
+  <!-- 予測画面 -->
+  <div id="screen-predicting" class="screen">
+    <div class="round-info" id="predict-round"></div>
+    <div class="question-card">
+      <div class="question-text" id="predict-question"></div>
+    </div>
+    <p class="info">どちらの回答を選んだ人が何人いると思いますか？</p>
+    <div id="predict-options"></div>
+    <div id="predict-sent" class="sent-msg" style="display:none">✓ 予測を送信しました。全員の回答を待っています...</div>
+  </div>
+
+  <!-- 結果画面 -->
+  <div id="screen-result" class="screen">
+    <h2 id="result-title"></h2>
+    <div id="answer-counts"></div>
+    <div id="my-score-card"></div>
+    <div class="score-card">
+      <div id="result-scores"></div>
+    </div>
+    <p class="waiting-count">次のラウンドに自動で進みます...</p>
+  </div>
+
+  <!-- 最終結果画面 -->
+  <div id="screen-finished" class="screen">
+    <h2>ゲーム終了！</h2>
+    <div class="score-card">
+      <div id="final-scores"></div>
+    </div>
+    <button class="btn-primary" onclick="resetGame()" style="margin-top:16px">トップに戻る</button>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import {
+    getFirestore, doc, collection, setDoc, updateDoc, getDoc, getDocs,
+    onSnapshot, serverTimestamp, increment
+  } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+  const app = initializeApp({
+    apiKey: "AIzaSyCWkpT6zhxIEpC2YF6u8SZc5Y89jWW6tvQ",
+    authDomain: "hitokazu-game.firebaseapp.com",
+    projectId: "hitokazu-game",
+    storageBucket: "hitokazu-game.firebasestorage.app",
+    messagingSenderId: "803714424801",
+    appId: "1:803714424801:android:eb741310f92ad70b96bca0"
+  });
+
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  let state = {
+    uid: null,
+    roomId: null,
+    isHost: false,
+    nickname: '',
+    selectedAnswer: null,
+    predictionSent: false,
+    currentPhase: null,
+    currentRound: 0,
+    roomUnsub: null,
+    playersUnsub: null,
+    autoAdvanceTimer: null,
+  };
+
+  // 匿名認証
+  await signInAnonymously(auth);
+  state.uid = auth.currentUser.uid;
+
+  // グローバル関数
+  window.showScreen = showScreen;
+  window.goToCreate = () => showScreen('create');
+  window.joinRoom = joinRoom;
+  window.createRoom = createRoom;
+  window.startGame = startGame;
+  window.submitAnswer = submitAnswer;
+  window.submitPrediction = submitPrediction;
+  window.resetGame = resetGame;
+
+  function showScreen(name) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + name).classList.add('active');
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideError(id) {
+    document.getElementById(id).style.display = 'none';
+  }
+
+  function generateRoomId() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
+
+  async function createRoom() {
+    const hostName = document.getElementById('host-name').value.trim();
+    if (!hostName) return showError('create-error', 'ホスト名を入力してください');
+    hideError('create-error');
+
+    const roomId = generateRoomId();
+    state.roomId = roomId;
+    state.isHost = true;
+    state.nickname = hostName;
+
+    await setDoc(doc(db, 'rooms', roomId), {
+      hostName, hostUid: state.uid,
+      status: 'WAITING', currentRound: 0, totalRounds: 5,
+      currentQuestion: null, createdAt: serverTimestamp(),
+    });
+    await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
+      nickname: hostName, isHost: true, joinedAt: serverTimestamp(),
+    });
+
+    enterRoom();
+  }
+
+  async function joinRoom() {
+    const nickname = document.getElementById('nickname').value.trim();
+    const roomId = document.getElementById('room-id-input').value.trim().toUpperCase();
+    if (!nickname) return showError('home-error', 'ニックネームを入力してください');
+    if (!roomId) return showError('home-error', 'ルームIDを入力してください');
+    hideError('home-error');
+
+    const roomSnap = await getDoc(doc(db, 'rooms', roomId));
+    if (!roomSnap.exists()) return showError('home-error', 'ルームが見つかりません');
+    if (roomSnap.data().status !== 'WAITING') return showError('home-error', 'ゲームはすでに開始されています');
+
+    state.roomId = roomId;
+    state.isHost = false;
+    state.nickname = nickname;
+
+    await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
+      nickname, isHost: false, joinedAt: serverTimestamp(),
+    });
+
+    enterRoom();
+  }
+
+  function enterRoom() {
+    document.getElementById('display-room-id').textContent = state.roomId;
+    document.getElementById('host-controls').style.display = state.isHost ? 'block' : 'none';
+    document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
+    showScreen('waiting');
+    startObserving();
+  }
+
+  function startObserving() {
+    // プレイヤー監視
+    state.playersUnsub = onSnapshot(
+      collection(db, 'rooms', state.roomId, 'players'),
+      snap => {
+        const players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const list = document.getElementById('player-list');
+        list.innerHTML = players.map(p =>
+          `<li>${p.nickname}${p.isHost ? '<span class="badge">ホスト</span>' : ''}</li>`
+        ).join('');
+        if (state.isHost) {
+          const msg = document.getElementById('player-count-msg');
+          msg.textContent = `参加者 ${players.length}人`;
+          document.getElementById('start-btn').disabled = players.length < 1;
+        }
+      }
+    );
+
+    // ルーム状態監視
+    state.roomUnsub = onSnapshot(doc(db, 'rooms', state.roomId), snap => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const phase = data.status;
+
+      if (phase === state.currentPhase && data.currentRound === state.currentRound) return;
+      state.currentPhase = phase;
+      state.currentRound = data.currentRound;
+
+      if (phase === 'ANSWERING') {
+        state.selectedAnswer = null;
+        state.predictionSent = false;
+        renderAnswering(data);
+      } else if (phase === 'PREDICTING') {
+        renderPredicting(data);
+      } else if (phase === 'RESULT') {
+        renderResult(data);
+        if (state.isHost) {
+          clearTimeout(state.autoAdvanceTimer);
+          state.autoAdvanceTimer = setTimeout(() => advanceToNextRound(data), 10000);
+        }
+      } else if (phase === 'FINISHED') {
+        renderFinished(data);
+      }
+    });
+  }
+
+  async function startGame() {
+    const questions = [
+      { questionId:'q001', text:'犬を飼ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q002', text:'朝ごはんを毎日食べる？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q003', text:'運転免許を持っている？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q004', text:'海外に行ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q005', text:'コーヒーを毎日飲む？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+    ];
+    await updateDoc(doc(db, 'rooms', state.roomId), {
+      status: 'ANSWERING', currentRound: 1,
+      currentQuestion: questions[0], startedAt: serverTimestamp(),
+    });
+  }
+
+  function renderAnswering(data) {
+    const q = data.currentQuestion;
+    document.getElementById('answer-round').textContent = `第${data.currentRound}問 / 全${data.totalRounds}問`;
+    document.getElementById('answer-question').textContent = q.text;
+    document.getElementById('answer-sent').style.display = 'none';
+
+    const btns = document.getElementById('answer-buttons');
+    btns.innerHTML = q.options.map(opt =>
+      `<button class="btn-answer" onclick="submitAnswer('${opt}')">${opt}</button>`
+    ).join('');
+    showScreen('answering');
+  }
+
+  async function submitAnswer(answer) {
+    if (state.selectedAnswer) return;
+    state.selectedAnswer = answer;
+
+    document.querySelectorAll('.btn-answer').forEach(b => {
+      b.disabled = true;
+      if (b.textContent === answer) b.classList.add('selected');
+    });
+    document.getElementById('answer-sent').style.display = 'block';
+
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomData = (await getDoc(roomRef)).data();
+    const currentRound = roomData.currentRound;
+    const roundRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound));
+    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers', state.uid);
+
+    await setDoc(answerRef, { answer, answeredAt: serverTimestamp() });
+
+    // 全員回答したか確認
+    const [players, answers] = await Promise.all([
+      getDocs(collection(db, 'rooms', state.roomId, 'players')),
+      getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers')),
+    ]);
+
+    if (answers.size >= players.size) {
+      const q = roomData.currentQuestion;
+      const counts = {};
+      q.options.forEach(o => counts[o] = 0);
+      answers.docs.forEach(d => {
+        const a = d.data().answer;
+        if (a in counts) counts[a]++;
+      });
+      await updateDoc(roomRef, { status: 'PREDICTING', answerCounts: counts });
+    }
+  }
+
+  function renderPredicting(data) {
+    const q = data.currentQuestion;
+    document.getElementById('predict-round').textContent = `第${data.currentRound}問 / 全${data.totalRounds}問`;
+    document.getElementById('predict-question').textContent = q.text;
+    document.getElementById('predict-sent').style.display = 'none';
+
+    const opts = document.getElementById('predict-options');
+    opts.innerHTML = `
+      <div style="margin-bottom:16px">
+        <p style="margin-bottom:6px;font-weight:bold">「はい」を選んだ人は何人？</p>
+        <div class="predict-input">
+          <input type="number" id="pred-はい" min="0" max="20" value="0" style="width:80px">
+          <span>人</span>
+          <button class="btn-primary" style="width:auto;padding:10px 16px" onclick="submitPrediction('はい', parseInt(document.getElementById('pred-はい').value))">送信</button>
+        </div>
+      </div>
+    `;
+    showScreen('predicting');
+  }
+
+  async function submitPrediction(targetOption, predictedCount) {
+    if (state.predictionSent) return;
+    state.predictionSent = true;
+
+    document.getElementById('predict-sent').style.display = 'block';
+    document.querySelectorAll('#predict-options button').forEach(b => b.disabled = true);
+
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomData = (await getDoc(roomRef)).data();
+    const currentRound = roomData.currentRound;
+    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers', state.uid);
+
+    await updateDoc(answerRef, { prediction: predictedCount, targetOption, predictedAt: serverTimestamp() });
+
+    // 全員予測したか確認
+    const [players, answers] = await Promise.all([
+      getDocs(collection(db, 'rooms', state.roomId, 'players')),
+      getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers')),
+    ]);
+
+    const predicted = answers.docs.filter(d => d.data().prediction !== undefined);
+    if (predicted.size >= players.size || predicted.length >= players.size) {
+      await finalizeRound(roomRef, roomData, currentRound, answers.docs);
+    }
+  }
+
+  async function finalizeRound(roomRef, roomData, currentRound, answerDocs) {
+    const counts = roomData.answerCounts || {};
+    const totalRounds = roomData.totalRounds || 5;
+
+    // ニックネームを取得
+    const playersSnap = await getDocs(collection(db, 'rooms', state.roomId, 'players'));
+    const nicknameMap = {};
+    playersSnap.docs.forEach(d => nicknameMap[d.id] = d.data().nickname || '');
+
+    const scores = answerDocs
+      .filter(d => d.data().prediction !== undefined)
+      .map(d => {
+        const data = d.data();
+        const actual = counts[data.targetOption] || 0;
+        const predicted = data.prediction || 0;
+        const score = Math.max(0, 100 - Math.abs(predicted - actual) * 20);
+        return { playerId: d.id, nickname: nicknameMap[d.id] || '', targetOption: data.targetOption, predictedCount: predicted, actualCount: actual, roundScore: score };
+      })
+      .sort((a, b) => b.roundScore - a.roundScore);
+
+    const isLast = currentRound >= totalRounds;
+    if (isLast) {
+      await updateDoc(roomRef, { status: 'FINISHED', finalScores: scores, finishedAt: serverTimestamp() });
+    } else {
+      await updateDoc(roomRef, { status: 'RESULT', roundScores: scores, nextRound: currentRound + 1 });
+    }
+  }
+
+  async function advanceToNextRound(roomData) {
+    const questions = [
+      { questionId:'q001', text:'犬を飼ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q002', text:'朝ごはんを毎日食べる？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q003', text:'運転免許を持っている？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q004', text:'海外に行ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+      { questionId:'q005', text:'コーヒーを毎日飲む？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
+    ];
+    const nextRound = roomData.nextRound;
+    if (!nextRound) return;
+    const nextQuestion = questions[nextRound - 1];
+    await updateDoc(doc(db, 'rooms', state.roomId), {
+      status: 'ANSWERING', currentRound: nextRound,
+      currentQuestion: nextQuestion, answerCounts: {}, roundScores: [],
+    });
+  }
+
+  function renderResult(data) {
+    document.getElementById('result-title').textContent = `第${data.currentRound}問 結果`;
+
+    const q = data.currentQuestion;
+    const counts = data.answerCounts || {};
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    document.getElementById('answer-counts').innerHTML = `
+      <div class="question-card" style="margin-bottom:16px">
+        <div class="question-text" style="font-size:16px;margin-bottom:12px">${q.text}</div>
+        ${q.options.map(opt => {
+          const n = counts[opt] || 0;
+          const pct = total > 0 ? Math.round(n / total * 100) : 0;
+          return `<div class="count-bar">
+            <span>${opt}</span>
+            <div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>
+            <span class="num">${n}人</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+
+    const scores = data.roundScores || [];
+    const myScore = scores.find(s => s.playerId === state.uid);
+    document.getElementById('my-score-card').innerHTML = myScore ? `
+      <div class="score-card" style="background:#ede7f6;margin-bottom:12px">
+        ${myScore.roundScore === 100 ? '<p style="text-align:center;font-size:18px">🎯 パーフェクト！</p>' : ''}
+        <p>あなたの予測: 「${myScore.targetOption}」が ${myScore.predictedCount}人</p>
+        <p>実際: ${myScore.actualCount}人</p>
+        <p style="font-size:24px;font-weight:bold;color:#6200ea;text-align:center">+${myScore.roundScore}点</p>
+      </div>` : '';
+
+    document.getElementById('result-scores').innerHTML = scores.map((s, i) => {
+      const isMe = s.playerId === state.uid;
+      const name = (s.nickname || s.playerId) + (isMe ? '（あなた）' : '');
+      return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
+        <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
+        <span>${name}</span>
+        <span class="score-pts">+${s.roundScore}点</span>
+      </div>`;
+    }).join('');
+
+    showScreen('result');
+  }
+
+  function renderFinished(data) {
+    const scores = data.finalScores || [];
+    document.getElementById('final-scores').innerHTML = scores.map((s, i) => {
+      const isMe = s.playerId === state.uid;
+      const name = (s.nickname || s.playerId) + (isMe ? '（あなた）' : '');
+      return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
+        <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
+        <span>${name}</span>
+        <span class="score-pts">${s.roundScore}点</span>
+      </div>`;
+    }).join('');
+    showScreen('finished');
+  }
+
+  function resetGame() {
+    if (state.roomUnsub) state.roomUnsub();
+    if (state.playersUnsub) state.playersUnsub();
+    clearTimeout(state.autoAdvanceTimer);
+    state = { ...state, roomId: null, isHost: false, nickname: '', selectedAnswer: null,
+      predictionSent: false, currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null };
+    showScreen('home');
+  }
+</script>
+</body>
+</html>

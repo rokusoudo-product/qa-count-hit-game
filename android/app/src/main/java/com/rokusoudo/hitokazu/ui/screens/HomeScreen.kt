@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -21,6 +22,10 @@ fun HomeScreen(
     onNavigateToScanner: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val versionName = remember {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }
     var hostName by remember { mutableStateOf("") }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
@@ -28,8 +33,8 @@ fun HomeScreen(
     var joinNickname by remember { mutableStateOf("") }
 
     // ルーム作成成功→QR画面へ
-    LaunchedEffect(uiState.qrBase64) {
-        if (uiState.qrBase64.isNotEmpty() && uiState.isHost) {
+    LaunchedEffect(uiState.roomId, uiState.isHost) {
+        if (uiState.roomId.isNotEmpty() && uiState.isHost) {
             onNavigateToQr()
         }
     }
@@ -40,6 +45,7 @@ fun HomeScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -86,6 +92,17 @@ fun HomeScreen(
             Text("ルームIDで参加")
         }
     }
+
+    // バージョン表示
+    Text(
+        text = "v$versionName",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(12.dp),
+    )
+    } // Box end
 
     // エラーSnackbar
     uiState.errorMessage?.let { msg ->

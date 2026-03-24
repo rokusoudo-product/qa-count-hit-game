@@ -29,7 +29,7 @@ fun AnsweringScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ConnectionBanner(
-            wsState = uiState.wsState,
+            isDisconnected = false,
             onReconnect = { viewModel.reconnect() },
         )
 

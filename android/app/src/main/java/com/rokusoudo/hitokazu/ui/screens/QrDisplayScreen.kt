@@ -1,7 +1,5 @@
 package com.rokusoudo.hitokazu.ui.screens
 
-import android.graphics.BitmapFactory
-import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -13,6 +11,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.zxing.BarcodeFormat
+import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.rokusoudo.hitokazu.data.model.GamePhase
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
@@ -30,10 +30,11 @@ fun QrDisplayScreen(
         }
     }
 
-    val bitmap = remember(uiState.qrBase64) {
+    val bitmap = remember(uiState.roomId) {
         runCatching {
-            val bytes = Base64.decode(uiState.qrBase64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            val encoder = BarcodeEncoder()
+            encoder.encodeBitmap(uiState.roomId, BarcodeFormat.QR_CODE, 512, 512)
+                .asImageBitmap()
         }.getOrNull()
     }
 
@@ -66,7 +67,7 @@ fun QrDisplayScreen(
             )
         } ?: CircularProgressIndicator()
 
-        Divider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
         Text(
             text = "参加者 (${uiState.players.size}人)",

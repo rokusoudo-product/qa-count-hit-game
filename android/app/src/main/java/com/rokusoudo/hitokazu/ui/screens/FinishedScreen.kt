@@ -61,7 +61,7 @@ fun FinishedScreen(
                     Text(text = "🏆 優勝", fontSize = 18.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = it.playerId + if (it.playerId == uiState.playerId) "（あなた！）" else "",
+                        text = it.nickname.ifEmpty { it.playerId } + if (it.playerId == uiState.playerId) "（あなた！）" else "",
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -138,13 +138,13 @@ private fun FinalRankingRow(rank: Int, score: PlayerScore, myPlayerId: String) {
                     1 -> "🥇"
                     2 -> "🥈"
                     3 -> "🥉"
-                    else -> "$rank位"
+                    else -> "${rank}位"
                 },
                 fontSize = 20.sp,
                 modifier = Modifier.width(40.dp),
             )
             Text(
-                text = score.playerId + if (isMe) "（あなた）" else "",
+                text = score.nickname.ifEmpty { score.playerId } + if (isMe) "（あなた）" else "",
                 fontSize = 15.sp,
                 modifier = Modifier.weight(1f),
             )

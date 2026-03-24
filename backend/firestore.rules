@@ -1,23 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ルームは誰でも読み取り可能、作成のみCloud Functions経由
-    match /rooms/{roomId} {
-      allow read: if true;
-      allow write: if false; // Cloud Functionsのみ書き込み可
-
-      // プレイヤー一覧：同じルームのメンバーのみ読み取り
-      match /players/{playerId} {
-        allow read: if true;
-        allow write: if false;
-      }
-
-      // 回答：同じルームのメンバーのみ読み取り
-      match /rounds/{round}/answers/{playerId} {
-        allow read: if true;
-        allow write: if false;
-      }
+    // 認証済みユーザー（匿名認証含む）はすべてのドキュメントを読み書き可能
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }

@@ -11,7 +11,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokusoudo.hitokazu.data.model.GamePhase
-import com.rokusoudo.hitokazu.data.websocket.WsState
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
 @Composable
@@ -45,18 +44,11 @@ fun WaitingRoomScreen(
             modifier = Modifier.padding(top = 8.dp),
         )
 
-        // 接続状態
-        val wsLabel = when (uiState.wsState) {
-            is WsState.Connected -> "接続中"
-            is WsState.Connecting -> "接続しています..."
-            else -> "未接続"
-        }
+        // 接続状態（Firebase自動管理）
         Text(
-            text = wsLabel,
+            text = "Firebase接続中",
             fontSize = 12.sp,
-            color = if (uiState.wsState is WsState.Connected)
-                MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.error,
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
         )
 

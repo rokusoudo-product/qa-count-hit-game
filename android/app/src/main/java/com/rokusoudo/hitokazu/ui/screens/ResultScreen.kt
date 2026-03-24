@@ -168,13 +168,13 @@ private fun RankingRow(rank: Int, score: PlayerScore, myPlayerId: String) {
                     1 -> "🥇"
                     2 -> "🥈"
                     3 -> "🥉"
-                    else -> "$rank位"
+                    else -> "${rank}位"
                 },
                 fontSize = 20.sp,
                 modifier = Modifier.width(40.dp),
             )
             Text(
-                text = score.playerId + if (isMe) "（あなた）" else "",
+                text = score.nickname.ifEmpty { score.playerId } + if (isMe) "（あなた）" else "",
                 fontSize = 15.sp,
                 modifier = Modifier.weight(1f),
             )

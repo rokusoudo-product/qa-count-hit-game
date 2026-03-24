@@ -9,21 +9,17 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.rokusoudo.hitokazu.data.websocket.WsState
 
 @Composable
 fun ConnectionBanner(
-    wsState: WsState,
+    isDisconnected: Boolean,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isError = wsState is WsState.Error || wsState is WsState.Disconnected
-
     AnimatedVisibility(
-        visible = isError,
+        visible = isDisconnected,
         enter = slideInVertically() + fadeIn(),
         exit = slideOutVertically() + fadeOut(),
         modifier = modifier,

@@ -1,10 +1,12 @@
 package com.rokusoudo.hitokazu.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rokusoudo.hitokazu.data.firebase.FirebaseRepository
 import com.rokusoudo.hitokazu.data.model.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -33,20 +35,27 @@ class GameViewModel : ViewModel() {
 
     private var roomObserverJob: Job? = null
     private var playerObserverJob: Job? = null
+    private var autoAdvanceJob: Job? = null
 
     // ── ルーム作成（ホスト） ──────────────────────────────────
     fun createRoom(hostName: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             repo.createRoom(hostName)
-                .onSuccess { roomId ->
+                .onSuccess { res ->
                     _uiState.update {
-                        it.copy(roomId = roomId, isHost = true, nickname = hostName)
+                        it.copy(
+                            roomId = res.roomId,
+                            playerId = res.playerId,
+                            nickname = res.nickname,
+                            isHost = true,
+                        )
                     }
-                    startObserving(roomId)
+                    startObserving(res.roomId)
                 }
-                .onFailure {
-                    _uiState.update { it.copy(errorMessage = "ルーム作成に失敗しました") }
+                .onFailure { e ->
+                    Log.e("GameViewModel", "createRoom failed", e)
+                    _uiState.update { it.copy(errorMessage = "ルーム作成に失敗しました: ${e.message}") }
                 }
             _uiState.update { it.copy(isLoading = false) }
         }
@@ -70,10 +79,10 @@ class GameViewModel : ViewModel() {
                 }
                 .onFailure { e ->
                     val msg = when {
-                        e.message?.contains("NOT_FOUND") == true -> "ルームが見つかりません"
-                        e.message?.contains("FAILED_PRECONDITION") == true -> "ゲームはすでに開始されています"
-                        e.message?.contains("RESOURCE_EXHAUSTED") == true -> "ルームが満員です"
-                        else -> "参加に失敗しました"
+                        e.message?.contains("見つかりません") == true -> "ルームが見つかりません"
+                        e.message?.contains("開始されています") == true -> "ゲームはすでに開始されています"
+                        e.message?.contains("満員") == true -> "ルームが満員です"
+                        else -> "参加に失敗しました: ${e.message}"
                     }
                     _uiState.update { it.copy(errorMessage = msg) }
                 }
@@ -110,7 +119,6 @@ class GameViewModel : ViewModel() {
 
     // ── Firestoreリアルタイム監視 ─────────────────────────────
     private fun startObserving(roomId: String) {
-        // ルーム状態監視
         roomObserverJob?.cancel()
         roomObserverJob = viewModelScope.launch {
             repo.observeRoom(roomId).collect { snapshot ->
@@ -130,10 +138,19 @@ class GameViewModel : ViewModel() {
                         ) "" else state.selectedAnswer,
                     )
                 }
+
+                // ホストがRESULTを検知したら10秒後に次ラウンドへ自動進行
+                if (snapshot.status == GamePhase.RESULT && _uiState.value.isHost) {
+                    autoAdvanceJob?.cancel()
+                    autoAdvanceJob = viewModelScope.launch {
+                        delay(10_000)
+                        repo.advanceToNextRound(roomId)
+                            .onFailure { Log.e("GameViewModel", "advanceToNextRound failed", it) }
+                    }
+                }
             }
         }
 
-        // プレイヤー一覧監視
         playerObserverJob?.cancel()
         playerObserverJob = viewModelScope.launch {
             repo.observePlayers(roomId).collect { players ->
@@ -143,6 +160,7 @@ class GameViewModel : ViewModel() {
     }
 
     fun resetGame() {
+        autoAdvanceJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
         _uiState.value = GameUiState()
@@ -150,11 +168,11 @@ class GameViewModel : ViewModel() {
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
-    // Firebase版では reconnect 不要（自動再接続）
     fun reconnect() {}
 
     override fun onCleared() {
         super.onCleared()
+        autoAdvanceJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
     }
