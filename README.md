@@ -181,3 +181,79 @@ firebase deploy --only firestore:rules
 |------|------|
 | プロダクトオーナー | POエージェント（Claude） |
 | エンジニア | エンジニアエージェント（Claude） |
+
+---
+
+## AI自動修正ワークフロー
+
+GitHubのissueに問題を報告すると、Claude AIが自動でコードを修正してPRを作成します。
+
+### 構成図
+
+```
+開発者
+  │
+  │ 1. issueを作成（バグ報告・改善要望）
+  ▼
+GitHub Issues
+  │
+  │ 2. コメントに /fix と投稿
+  ▼
+GitHub Actions
+  │
+  ├── 3. リポジトリをチェックアウト
+  │
+  ├── 4. Claude Code CLI を起動
+  │         │
+  │         │  ANTHROPIC_API_KEY
+  │         ▼
+  │     Anthropic API（Claude Sonnet）
+  │         │
+  │         │ issueの内容を読んでコードを修正
+  │         ▼
+  │     修正済みコード
+  │
+  ├── 5. 新しいブランチにコミット＆プッシュ
+  │
+  └── 6. Pull Requestを自動作成
+            │
+            │ 7. 開発者がレビュー＆マージ
+            ▼
+          main ブランチに反映
+```
+
+### 使い方
+
+**1. issueを作成する**
+
+GitHubの [Issues](https://github.com/rokusoudo-product/qa-count-hit-game/issues/new) から問題を報告します。
+修正内容が伝わるよう、具体的に記述してください。
+
+```
+タイトル例: 結果画面でニックネームではなくIDが表示される
+
+本文例:
+## 問題
+結果画面のランキングにユーザーのニックネームではなく
+Firebase UIDのハッシュ値が表示されている。
+
+## 期待する動作
+入室時に入力したニックネームが表示される。
+```
+
+**2. `/fix` とコメントする**
+
+issueのコメント欄に以下を投稿するだけです。
+
+```
+/fix
+```
+
+**3. PRが自動作成される**
+
+数分後にClaudeが修正コードを含むPRを自動作成します。
+内容を確認してmainブランチにマージしてください。
+
+### ワークフロー設定ファイル
+
+`.github/workflows/claude-fix.yml`
