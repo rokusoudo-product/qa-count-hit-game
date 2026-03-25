@@ -2,6 +2,7 @@
 人数当てゲーム - Firebase Cloud Functions (Python 3.12)
 """
 import json
+import random
 import uuid
 from datetime import datetime, timezone
 
@@ -13,42 +14,47 @@ initialize_app()
 REGION = options.SupportedRegion.US_CENTRAL1
 CORS = options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"])
 
+DEFAULT_ROUNDS = 5
+
 QUESTIONS = [
-    {
-        "questionId": "q001",
-        "text": "犬派？猫派？",
-        "options": ["犬派", "猫派"],
-        "answerSeconds": 30,
-        "predictSeconds": 20,
-    },
-    {
-        "questionId": "q002",
-        "text": "朝型？夜型？",
-        "options": ["朝型", "夜型"],
-        "answerSeconds": 30,
-        "predictSeconds": 20,
-    },
-    {
-        "questionId": "q003",
-        "text": "派手なパーティーと静かな家飲み、どっち派？",
-        "options": ["派手なパーティー", "静かな家飲み"],
-        "answerSeconds": 30,
-        "predictSeconds": 20,
-    },
-    {
-        "questionId": "q004",
-        "text": "カラオケで歌う派？聴く派？",
-        "options": ["歌う派", "聴く派"],
-        "answerSeconds": 30,
-        "predictSeconds": 20,
-    },
-    {
-        "questionId": "q005",
-        "text": "旅行は計画派？行き当たりばったり派？",
-        "options": ["計画派", "行き当たりばったり派"],
-        "answerSeconds": 30,
-        "predictSeconds": 20,
-    },
+    # friend: アイスブレーキング
+    {"questionId": "q001", "text": "自分は猫派だ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q002", "text": "出身地は田舎だと思っている", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q003", "text": "ディズニーよりジブリ派だ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q004", "text": "朝型人間だと思う", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q005", "text": "犬を飼ったことがある", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q006", "text": "運転免許を持っている", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q007", "text": "海外に行ったことがある", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q008", "text": "コーヒーを毎日飲む", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q009", "text": "辛い食べ物が好きだ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q010", "text": "カラオケは得意なほうだ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q011", "text": "旅行は計画をたてる派だ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q012", "text": "朝ごはんを毎日食べる", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q013", "text": "SNSを毎日チェックする", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q014", "text": "スポーツ観戦が好きだ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q015", "text": "映画より本派だ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q016", "text": "甘いものより辛いものが好きだ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q017", "text": "ひとり旅をしたことがある", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q018", "text": "音楽を聴きながら作業する派だ", "options": ["はい", "いいえ"], "tags": ["friend"], "answerSeconds": 30, "predictSeconds": 20},
+    # party: パーティー向け
+    {"questionId": "q019", "text": "自分は右隣の人よりイケてると思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q020", "text": "このメンバー内で一番テンションが高いと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q021", "text": "今夜一番盛り上げるのは自分だと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q022", "text": "このメンバー内で一番おしゃれだと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q023", "text": "このメンバーの中で一番遅刻しがちだと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q024", "text": "今日の主役は自分だと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q025", "text": "このメンバーの中で一番食べると思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q026", "text": "このメンバーの中で一番声が大きいと思う", "options": ["はい", "いいえ"], "tags": ["party"], "answerSeconds": 30, "predictSeconds": 20},
+    # deep: 仲が良い関係性向け・成人向け
+    {"questionId": "q027", "text": "お酒で失敗したことがある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q028", "text": "人に言えない趣味がある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q029", "text": "徹夜したことが10回以上ある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q030", "text": "人に絶対言えない秘密がある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q031", "text": "恋人や好きな人に嘘をついたことがある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q032", "text": "人生で大きく後悔していることがある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q033", "text": "泣いた映画・ドラマがある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q034", "text": "今の仕事・学業に満足している", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
+    {"questionId": "q035", "text": "一目惚れをしたことがある", "options": ["はい", "いいえ"], "tags": ["deep"], "answerSeconds": 30, "predictSeconds": 20},
 ]
 
 
@@ -77,7 +83,7 @@ def create_room(req: https_fn.Request) -> https_fn.Response:
         "hostName": host_name,
         "status": "WAITING",
         "currentRound": 0,
-        "totalRounds": len(QUESTIONS),
+        "totalRounds": DEFAULT_ROUNDS,
         "currentQuestion": None,
         "createdAt": datetime.now(timezone.utc),
     })
@@ -139,11 +145,13 @@ def start_game(req: https_fn.Request) -> https_fn.Response:
     if len(players) < 1:
         return _err("参加者が必要です")
 
-    first_question = QUESTIONS[0]
+    question_list = random.sample(QUESTIONS, min(DEFAULT_ROUNDS, len(QUESTIONS)))
     room_ref.update({
         "status": "ANSWERING",
         "currentRound": 1,
-        "currentQuestion": first_question,
+        "totalRounds": len(question_list),
+        "questionList": question_list,
+        "currentQuestion": question_list[0],
         "startedAt": datetime.now(timezone.utc),
     })
 
@@ -291,7 +299,8 @@ def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
         })
     else:
         next_round = current_round + 1
-        next_question = QUESTIONS[next_round - 1]
+        question_list = room_data.get("questionList", QUESTIONS)
+        next_question = question_list[next_round - 1]
         room_ref.update({
             "status": "RESULT",
             "roundScores": scores,

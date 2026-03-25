@@ -12,6 +12,7 @@ data class Question(
     val questionId: String,
     val text: String,
     val options: List<String>,
+    val tags: List<String> = emptyList(),
     val answerSeconds: Int,
     val predictSeconds: Int,
 )
@@ -56,10 +57,12 @@ data class RoomSnapshot(
 
             val qMap = data["currentQuestion"] as? Map<String, Any>
             val question = qMap?.let {
+                @Suppress("UNCHECKED_CAST")
                 Question(
                     questionId = it["questionId"] as? String ?: "",
                     text = it["text"] as? String ?: "",
                     options = (it["options"] as? List<String>) ?: emptyList(),
+                    tags = (it["tags"] as? List<String>) ?: emptyList(),
                     answerSeconds = (it["answerSeconds"] as? Long)?.toInt() ?: 30,
                     predictSeconds = (it["predictSeconds"] as? Long)?.toInt() ?: 20,
                 )

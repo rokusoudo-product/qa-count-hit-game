@@ -39,7 +39,7 @@ class FirebaseRepository {
                 "hostUid" to uid,
                 "status" to "WAITING",
                 "currentRound" to 0,
-                "totalRounds" to QUESTIONS.size,
+                "totalRounds" to DEFAULT_ROUNDS,
                 "currentQuestion" to null,
                 "createdAt" to FieldValue.serverTimestamp(),
             )
@@ -86,12 +86,15 @@ class FirebaseRepository {
 
     // ── ゲーム開始 ──────────────────────────────────────────
     suspend fun startGame(roomId: String): Result<Unit> = runCatching {
-        val firstQuestion = QUESTIONS[0]
+        val shuffled = QUESTIONS.shuffled().take(DEFAULT_ROUNDS)
+        val questionList = shuffled.map { it.toMap() }
         db.collection("rooms").document(roomId).update(
             mapOf(
                 "status" to "ANSWERING",
                 "currentRound" to 1,
-                "currentQuestion" to firstQuestion.toMap(),
+                "totalRounds" to shuffled.size,
+                "questionList" to questionList,
+                "currentQuestion" to shuffled[0].toMap(),
                 "startedAt" to FieldValue.serverTimestamp(),
             )
         ).await()
@@ -178,13 +181,17 @@ class FirebaseRepository {
         val roomData = roomRef.get().await().data ?: error("ルームが見つかりません")
 
         val nextRound = (roomData["nextRound"] as? Long)?.toInt() ?: error("次のラウンド情報なし")
-        val nextQuestion = QUESTIONS[nextRound - 1]
+
+        @Suppress("UNCHECKED_CAST")
+        val questionList = roomData["questionList"] as? List<Map<String, Any>>
+            ?: error("問題リストが見つかりません")
+        val nextQuestionMap = questionList[nextRound - 1]
 
         roomRef.update(
             mapOf(
                 "status" to "ANSWERING",
                 "currentRound" to nextRound,
-                "currentQuestion" to nextQuestion.toMap(),
+                "currentQuestion" to nextQuestionMap,
                 "answerCounts" to emptyMap<String, Int>(),
                 "roundScores" to emptyList<Any>(),
             )
@@ -281,10 +288,13 @@ class FirebaseRepository {
 private fun calculateScore(actual: Int, predicted: Int): Int =
     maxOf(0, 100 - kotlin.math.abs(predicted - actual) * 20)
 
+private const val DEFAULT_ROUNDS = 5
+
 private data class QuestionData(
     val questionId: String,
     val text: String,
     val options: List<String>,
+    val tags: List<String> = emptyList(),
     val answerSeconds: Int = 30,
     val predictSeconds: Int = 20,
 ) {
@@ -292,15 +302,49 @@ private data class QuestionData(
         "questionId" to questionId,
         "text" to text,
         "options" to options,
+        "tags" to tags,
         "answerSeconds" to answerSeconds,
         "predictSeconds" to predictSeconds,
     )
 }
 
 private val QUESTIONS = listOf(
-    QuestionData("q001", "犬を飼ったことがある？", listOf("はい", "いいえ")),
-    QuestionData("q002", "朝ごはんを毎日食べる？", listOf("はい", "いいえ")),
-    QuestionData("q003", "運転免許を持っている？", listOf("はい", "いいえ")),
-    QuestionData("q004", "海外に行ったことがある？", listOf("はい", "いいえ")),
-    QuestionData("q005", "コーヒーを毎日飲む？", listOf("はい", "いいえ")),
+    // friend: アイスブレーキング
+    QuestionData("q001", "自分は猫派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q002", "出身地は田舎だと思っている", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q003", "ディズニーよりジブリ派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q004", "朝型人間だと思う", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q005", "犬を飼ったことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q006", "運転免許を持っている", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q007", "海外に行ったことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q008", "コーヒーを毎日飲む", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q009", "辛い食べ物が好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q010", "カラオケは得意なほうだ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q011", "旅行は計画をたてる派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q012", "朝ごはんを毎日食べる", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q013", "SNSを毎日チェックする", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q014", "スポーツ観戦が好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q015", "映画より本派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q016", "甘いものより辛いものが好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q017", "ひとり旅をしたことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
+    QuestionData("q018", "音楽を聴きながら作業する派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
+    // party: パーティー向け
+    QuestionData("q019", "自分は右隣の人よりイケてると思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q020", "このメンバー内で一番テンションが高いと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q021", "今夜一番盛り上げるのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q022", "このメンバー内で一番おしゃれだと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q023", "このメンバーの中で一番遅刻しがちだと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q024", "今日の主役は自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q025", "このメンバーの中で一番食べると思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    QuestionData("q026", "このメンバーの中で一番声が大きいと思う", listOf("はい", "いいえ"), tags = listOf("party")),
+    // deep: 仲が良い関係性向け・成人向け
+    QuestionData("q027", "お酒で失敗したことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q028", "人に言えない趣味がある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q029", "徹夜したことが10回以上ある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q030", "人に絶対言えない秘密がある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q031", "恋人や好きな人に嘘をついたことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q032", "人生で大きく後悔していることがある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q033", "泣いた映画・ドラマがある", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q034", "今の仕事・学業に満足している", listOf("はい", "いいえ"), tags = listOf("deep")),
+    QuestionData("q035", "一目惚れをしたことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
 )
