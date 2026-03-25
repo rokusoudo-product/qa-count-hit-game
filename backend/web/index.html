@@ -330,17 +330,66 @@
     });
   }
 
+  const ALL_QUESTIONS = [
+    // friend: アイスブレーキング
+    { questionId:'f001', text:'自分は猫派だ（犬よりも猫が好き）', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f002', text:'自分の出身地は田舎だと思っている', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f003', text:'ディズニーよりジブリ派だ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f004', text:'自分は朝型人間だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f005', text:'運転免許を持っている', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f006', text:'海外に行ったことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f007', text:'泳ぐのが得意だ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f008', text:'辛い食べ物が得意だ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f009', text:'読書が好きだ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f010', text:'自炊を週3回以上している', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f011', text:'スポーツを定期的にしている', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f012', text:'ゲームが好きだ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f013', text:'SNSを毎日チェックする', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f014', text:'カラオケで歌うのが好きだ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f015', text:'自分は方向音痴だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f016', text:'初対面の人とすぐ仲良くなれる方だ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f017', text:'コーヒーよりお茶派だ', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f018', text:'映画を月1回以上見る', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f019', text:'犬を飼ったことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    { questionId:'f020', text:'一人旅をしたことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['friend'] },
+    // party: パーティー向け
+    { questionId:'p001', text:'自分は右隣の人よりイケてると思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p002', text:'このグループの中で一番早起きなのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p003', text:'このメンバーの中で一番食べるのが速いのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p004', text:'今日このメンバーの中で一番おしゃれをしてきたのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p005', text:'このメンバーの中で一番歌が上手いのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p006', text:'このグループで一番旅行好きなのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p007', text:'このメンバーの中で一番方向音痴なのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    { questionId:'p008', text:'このメンバーの中で一番スマホを見る時間が長いのは自分だと思う', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['party'] },
+    // deep: 仲が良い関係性向け・成人向け
+    { questionId:'d001', text:'お酒で失敗したことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d002', text:'告白したことがある（した側）', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d003', text:'バイトや仕事を無断でサボったことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d004', text:'徹夜で遊んだことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d005', text:'嘘の理由で欠席・欠勤したことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d006', text:'二日酔いになったことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d007', text:'初対面の人に一目惚れしたことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+    { questionId:'d008', text:'酔った勢いで連絡してしまったことがある', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20, tags:['deep'] },
+  ];
+
+  const TOTAL_ROUNDS_PER_GAME = 5;
+
+  function shuffleArray(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   async function startGame() {
-    const questions = [
-      { questionId:'q001', text:'犬を飼ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q002', text:'朝ごはんを毎日食べる？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q003', text:'運転免許を持っている？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q004', text:'海外に行ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q005', text:'コーヒーを毎日飲む？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-    ];
+    const questionQueue = shuffleArray(ALL_QUESTIONS).slice(0, TOTAL_ROUNDS_PER_GAME);
     await updateDoc(doc(db, 'rooms', state.roomId), {
       status: 'ANSWERING', currentRound: 1,
-      currentQuestion: questions[0], startedAt: serverTimestamp(),
+      totalRounds: questionQueue.length,
+      questionQueue: questionQueue,
+      currentQuestion: questionQueue[0], startedAt: serverTimestamp(),
     });
   }
 
@@ -468,16 +517,10 @@
   }
 
   async function advanceToNextRound(roomData) {
-    const questions = [
-      { questionId:'q001', text:'犬を飼ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q002', text:'朝ごはんを毎日食べる？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q003', text:'運転免許を持っている？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q004', text:'海外に行ったことがある？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-      { questionId:'q005', text:'コーヒーを毎日飲む？', options:['はい','いいえ'], answerSeconds:30, predictSeconds:20 },
-    ];
     const nextRound = roomData.nextRound;
     if (!nextRound) return;
-    const nextQuestion = questions[nextRound - 1];
+    const questionQueue = roomData.questionQueue || ALL_QUESTIONS.slice(0, TOTAL_ROUNDS_PER_GAME);
+    const nextQuestion = questionQueue[nextRound - 1];
     await updateDoc(doc(db, 'rooms', state.roomId), {
       status: 'ANSWERING', currentRound: nextRound,
       currentQuestion: nextQuestion, answerCounts: {}, roundScores: [],
