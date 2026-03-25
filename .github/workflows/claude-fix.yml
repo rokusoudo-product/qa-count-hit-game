@@ -1,0 +1,21 @@
+name: Claude Auto Fix
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude-fix:
+    # issueのコメントに /fix が含まれている場合に実行
+    if: |
+      github.event.issue.pull_request == null &&
+      contains(github.event.comment.body, '/fix')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
