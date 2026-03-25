@@ -14,6 +14,7 @@ data class Question(
     val options: List<String>,
     val answerSeconds: Int,
     val predictSeconds: Int,
+    val tags: List<String> = emptyList(),
 )
 
 data class PlayerScore(
@@ -62,6 +63,7 @@ data class RoomSnapshot(
                     options = (it["options"] as? List<String>) ?: emptyList(),
                     answerSeconds = (it["answerSeconds"] as? Long)?.toInt() ?: 30,
                     predictSeconds = (it["predictSeconds"] as? Long)?.toInt() ?: 20,
+                    tags = (it["tags"] as? List<*>)?.map { t -> t.toString() } ?: emptyList(),
                 )
             }
 

@@ -2,6 +2,7 @@
 人数当てゲーム - Firebase Cloud Functions (Python 3.12)
 """
 import json
+import random
 import uuid
 from datetime import datetime, timezone
 
@@ -13,41 +14,299 @@ initialize_app()
 REGION = options.SupportedRegion.US_CENTRAL1
 CORS = options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"])
 
+TOTAL_ROUNDS_PER_GAME = 5
+
 QUESTIONS = [
+    # ── friend: アイスブレーキング ────────────────────────────
     {
-        "questionId": "q001",
-        "text": "犬派？猫派？",
-        "options": ["犬派", "猫派"],
+        "questionId": "f001",
+        "text": "自分は猫派だ（犬よりも猫が好き）",
+        "options": ["はい", "いいえ"],
         "answerSeconds": 30,
         "predictSeconds": 20,
+        "tags": ["friend"],
     },
     {
-        "questionId": "q002",
-        "text": "朝型？夜型？",
-        "options": ["朝型", "夜型"],
+        "questionId": "f002",
+        "text": "自分の出身地は田舎だと思っている",
+        "options": ["はい", "いいえ"],
         "answerSeconds": 30,
         "predictSeconds": 20,
+        "tags": ["friend"],
     },
     {
-        "questionId": "q003",
-        "text": "派手なパーティーと静かな家飲み、どっち派？",
-        "options": ["派手なパーティー", "静かな家飲み"],
+        "questionId": "f003",
+        "text": "ディズニーよりジブリ派だ",
+        "options": ["はい", "いいえ"],
         "answerSeconds": 30,
         "predictSeconds": 20,
+        "tags": ["friend"],
     },
     {
-        "questionId": "q004",
-        "text": "カラオケで歌う派？聴く派？",
-        "options": ["歌う派", "聴く派"],
+        "questionId": "f004",
+        "text": "自分は朝型人間だと思う",
+        "options": ["はい", "いいえ"],
         "answerSeconds": 30,
         "predictSeconds": 20,
+        "tags": ["friend"],
     },
     {
-        "questionId": "q005",
-        "text": "旅行は計画派？行き当たりばったり派？",
-        "options": ["計画派", "行き当たりばったり派"],
+        "questionId": "f005",
+        "text": "運転免許を持っている",
+        "options": ["はい", "いいえ"],
         "answerSeconds": 30,
         "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f006",
+        "text": "海外に行ったことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f007",
+        "text": "泳ぐのが得意だ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f008",
+        "text": "辛い食べ物が得意だ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f009",
+        "text": "読書が好きだ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f010",
+        "text": "自炊を週3回以上している",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f011",
+        "text": "スポーツを定期的にしている",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f012",
+        "text": "ゲームが好きだ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f013",
+        "text": "SNSを毎日チェックする",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f014",
+        "text": "カラオケで歌うのが好きだ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f015",
+        "text": "自分は方向音痴だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f016",
+        "text": "初対面の人とすぐ仲良くなれる方だ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f017",
+        "text": "コーヒーよりお茶派だ",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f018",
+        "text": "映画を月1回以上見る",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f019",
+        "text": "犬を飼ったことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    {
+        "questionId": "f020",
+        "text": "一人旅をしたことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["friend"],
+    },
+    # ── party: パーティー向け ─────────────────────────────────
+    {
+        "questionId": "p001",
+        "text": "自分は右隣の人よりイケてると思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p002",
+        "text": "このグループの中で一番早起きなのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p003",
+        "text": "このメンバーの中で一番食べるのが速いのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p004",
+        "text": "今日このメンバーの中で一番おしゃれをしてきたのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p005",
+        "text": "このメンバーの中で一番歌が上手いのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p006",
+        "text": "このグループで一番旅行好きなのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p007",
+        "text": "このメンバーの中で一番方向音痴なのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    {
+        "questionId": "p008",
+        "text": "このメンバーの中で一番スマホを見る時間が長いのは自分だと思う",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["party"],
+    },
+    # ── deep: 仲が良い関係性向け・成人向け ───────────────────
+    {
+        "questionId": "d001",
+        "text": "お酒で失敗したことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d002",
+        "text": "告白したことがある（した側）",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d003",
+        "text": "バイトや仕事を無断でサボったことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d004",
+        "text": "徹夜で遊んだことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d005",
+        "text": "嘘の理由で欠席・欠勤したことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d006",
+        "text": "二日酔いになったことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d007",
+        "text": "初対面の人に一目惚れしたことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
+    },
+    {
+        "questionId": "d008",
+        "text": "酔った勢いで連絡してしまったことがある",
+        "options": ["はい", "いいえ"],
+        "answerSeconds": 30,
+        "predictSeconds": 20,
+        "tags": ["deep"],
     },
 ]
 
@@ -139,10 +398,13 @@ def start_game(req: https_fn.Request) -> https_fn.Response:
     if len(players) < 1:
         return _err("参加者が必要です")
 
-    first_question = QUESTIONS[0]
+    question_queue = random.sample(QUESTIONS, min(TOTAL_ROUNDS_PER_GAME, len(QUESTIONS)))
+    first_question = question_queue[0]
     room_ref.update({
         "status": "ANSWERING",
         "currentRound": 1,
+        "totalRounds": len(question_queue),
+        "questionQueue": question_queue,
         "currentQuestion": first_question,
         "startedAt": datetime.now(timezone.utc),
     })
@@ -260,7 +522,7 @@ def submit_prediction(req: https_fn.Request) -> https_fn.Response:
 def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
     question = room_data.get("currentQuestion", {})
     counts = room_data.get("answerCounts", {})
-    total_rounds = room_data.get("totalRounds", len(QUESTIONS))
+    total_rounds = room_data.get("totalRounds", TOTAL_ROUNDS_PER_GAME)
 
     scores = []
     for a_doc in answers:
@@ -291,7 +553,8 @@ def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
         })
     else:
         next_round = current_round + 1
-        next_question = QUESTIONS[next_round - 1]
+        question_queue = room_data.get("questionQueue", QUESTIONS)
+        next_question = question_queue[next_round - 1]
         room_ref.update({
             "status": "RESULT",
             "roundScores": scores,
