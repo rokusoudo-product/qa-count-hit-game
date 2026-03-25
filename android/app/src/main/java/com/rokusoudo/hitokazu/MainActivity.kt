@@ -1,5 +1,6 @@
 package com.rokusoudo.hitokazu
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,13 +30,20 @@ object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+
+    private var gameViewModel: GameViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             HitokazuTheme {
                 val navController = rememberNavController()
-                val gameViewModel: GameViewModel = viewModel()
+                val vm: GameViewModel = viewModel()
+                gameViewModel = vm
+
+                // 起動時のディープリンクを処理
+                handleInviteIntent(intent, vm)
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     NavHost(
@@ -45,7 +53,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         composable(Routes.HOME) {
                             HomeScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onNavigateToQr = { navController.navigate(Routes.QR_DISPLAY) },
                                 onNavigateToWaiting = { navController.navigate(Routes.WAITING_ROOM) },
                                 onNavigateToScanner = { navController.navigate(Routes.QR_SCANNER) },
@@ -53,7 +61,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.QR_DISPLAY) {
                             QrDisplayScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onGameStarted = {
                                     navController.navigate(Routes.ANSWERING) {
                                         popUpTo(Routes.HOME)
@@ -63,13 +71,13 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.QR_SCANNER) {
                             QrScannerScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onBack = { navController.popBackStack() },
                             )
                         }
                         composable(Routes.WAITING_ROOM) {
                             WaitingRoomScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onGameStarted = {
                                     navController.navigate(Routes.ANSWERING) {
                                         popUpTo(Routes.HOME)
@@ -79,19 +87,19 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.ANSWERING) {
                             AnsweringScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onPredicting = { navController.navigate(Routes.PREDICTING) },
                             )
                         }
                         composable(Routes.PREDICTING) {
                             PredictingScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onResult = { navController.navigate(Routes.RESULT) },
                             )
                         }
                         composable(Routes.RESULT) {
                             ResultScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onNextRound = {
                                     navController.navigate(Routes.ANSWERING) {
                                         popUpTo(Routes.ANSWERING) { inclusive = true }
@@ -106,15 +114,15 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.FINISHED) {
                             FinishedScreen(
-                                viewModel = gameViewModel,
+                                viewModel = vm,
                                 onRestart = {
-                                    gameViewModel.resetGame()
+                                    vm.resetGame()
                                     navController.navigate(Routes.HOME) {
                                         popUpTo(Routes.HOME) { inclusive = true }
                                     }
                                 },
                                 onHome = {
-                                    gameViewModel.resetGame()
+                                    vm.resetGame()
                                     navController.navigate(Routes.HOME) {
                                         popUpTo(Routes.HOME) { inclusive = true }
                                     }
@@ -123,6 +131,26 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // アプリが既に起動中に招待URLをタップした場合
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        gameViewModel?.let { handleInviteIntent(intent, it) }
+    }
+
+    // 招待URL（https://hitokazu.rokusoudo.com/join/{roomId}）からroomIdを抽出
+    private fun handleInviteIntent(intent: Intent, vm: GameViewModel) {
+        if (intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        val pathSegments = uri.pathSegments
+        // パスが /join/{roomId} の形式を期待
+        if (pathSegments.size >= 2 && pathSegments[0] == "join") {
+            val roomId = pathSegments[1].uppercase()
+            if (roomId.isNotBlank()) {
+                vm.setPendingJoinRoomId(roomId)
             }
         }
     }

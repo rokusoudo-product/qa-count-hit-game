@@ -146,6 +146,16 @@ fun HomeScreen(
         )
     }
 
+    // ディープリンク（招待URL）からroomIdが渡された場合、ダイアログを自動表示
+    LaunchedEffect(uiState.pendingJoinRoomId) {
+        val pendingId = uiState.pendingJoinRoomId
+        if (pendingId != null && uiState.roomId.isEmpty()) {
+            joinRoomId = pendingId
+            showJoinDialog = true
+            viewModel.clearPendingJoinRoomId()
+        }
+    }
+
     // ルームID入力ダイアログ
     if (showJoinDialog) {
         AlertDialog(

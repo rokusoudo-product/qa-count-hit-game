@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>人数当てゲーム - ルームに参加</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+      padding: 32px 24px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    h1 { font-size: 24px; color: #1a1a1a; margin-bottom: 8px; }
+    .subtitle { color: #666; font-size: 14px; margin-bottom: 24px; }
+    .room-id {
+      background: #f0f4ff;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 22px;
+      font-weight: bold;
+      color: #3f51b5;
+      letter-spacing: 4px;
+      margin-bottom: 24px;
+    }
+    label { display: block; text-align: left; font-size: 14px; color: #444; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      border: 1.5px solid #ccc;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #3f51b5; }
+    .form-group { margin-bottom: 16px; text-align: left; }
+    button {
+      width: 100%;
+      background: #3f51b5;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.2s;
+    }
+    button:hover { background: #303f9f; }
+    button:disabled { background: #aaa; cursor: default; }
+    .msg { font-size: 13px; margin-top: 16px; padding: 10px; border-radius: 8px; }
+    .msg.error { background: #fdecea; color: #c62828; }
+    .msg.success { background: #e8f5e9; color: #2e7d32; }
+    .msg.loading { background: #e3f2fd; color: #1565c0; }
+    .app-hint {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #eee;
+      font-size: 13px;
+      color: #888;
+    }
+    .app-hint a { color: #3f51b5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>人数当てゲーム</h1>
+    <p class="subtitle">みんなの回答を予測しよう！</p>
+
+    <p style="font-size:14px;color:#444;margin-bottom:8px;">参加するルーム</p>
+    <div class="room-id" id="room-id-display">読み込み中…</div>
+
+    <div class="form-group">
+      <label for="nickname">ニックネーム</label>
+      <input type="text" id="nickname" placeholder="例：たろう" maxlength="20" />
+    </div>
+
+    <button id="join-btn" onclick="joinRoom()" disabled>参加する</button>
+
+    <div id="message" class="msg" style="display:none;"></div>
+
+    <div class="app-hint">
+      Androidアプリでもプレイできます。<br/>
+      アプリではQRコードスキャンで参加できます。
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, collection, addDoc, serverTimestamp }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getAuth, signInAnonymously }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    // google-services.json の内容に合わせて設定してください
+    const firebaseConfig = window.__FIREBASE_CONFIG__ || {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // URLからroomIdを取得（/join/{roomId}）
+    const pathParts = location.pathname.split("/").filter(Boolean);
+    const roomId = (pathParts[pathParts.length - 1] || "").toUpperCase();
+
+    document.getElementById("room-id-display").textContent = roomId || "—";
+    document.getElementById("nickname").addEventListener("input", () => {
+      document.getElementById("join-btn").disabled =
+        document.getElementById("nickname").value.trim() === "";
+    });
+
+    function showMessage(text, type) {
+      const el = document.getElementById("message");
+      el.textContent = text;
+      el.className = "msg " + type;
+      el.style.display = "block";
+    }
+
+    window.joinRoom = async function () {
+      const nickname = document.getElementById("nickname").value.trim();
+      if (!nickname || !roomId) return;
+
+      document.getElementById("join-btn").disabled = true;
+      showMessage("参加しています…", "loading");
+
+      try {
+        // 匿名サインイン
+        await signInAnonymously(auth);
+        const uid = auth.currentUser.uid;
+
+        // ルームの存在・状態確認
+        const roomRef = doc(db, "rooms", roomId);
+        const roomSnap = await getDoc(roomRef);
+
+        if (!roomSnap.exists()) {
+          showMessage("ルームが見つかりません。ルームIDを確認してください。", "error");
+          document.getElementById("join-btn").disabled = false;
+          return;
+        }
+        const roomData = roomSnap.data();
+        if (roomData.status !== "WAITING") {
+          showMessage("ゲームはすでに開始されています。", "error");
+          document.getElementById("join-btn").disabled = false;
+          return;
+        }
+
+        // プレイヤーとして登録
+        const { setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+        await setDoc(doc(db, "rooms", roomId, "players", uid), {
+          nickname: nickname,
+          isHost: false,
+          joinedAt: serverTimestamp(),
+          isWebPlayer: true,
+        });
+
+        showMessage(`「${nickname}」として参加しました！ホストがゲームを開始するまでお待ちください。`, "success");
+        document.getElementById("join-btn").textContent = "参加済み";
+
+      } catch (e) {
+        console.error(e);
+        showMessage("エラーが発生しました: " + e.message, "error");
+        document.getElementById("join-btn").disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
