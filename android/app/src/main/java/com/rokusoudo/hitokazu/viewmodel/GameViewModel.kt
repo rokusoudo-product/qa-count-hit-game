@@ -25,6 +25,7 @@ data class GameUiState(
     val scores: List<PlayerScore> = emptyList(),
     val errorMessage: String? = null,
     val isLoading: Boolean = false,
+    val pendingJoinRoomId: String? = null,
 )
 
 class GameViewModel : ViewModel() {
@@ -169,6 +170,15 @@ class GameViewModel : ViewModel() {
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
     fun reconnect() {}
+
+    // ── ディープリンクから受け取ったルームIDをセット ──────────
+    fun setPendingJoinRoomId(roomId: String) {
+        _uiState.update { it.copy(pendingJoinRoomId = roomId) }
+    }
+
+    fun clearPendingJoinRoomId() {
+        _uiState.update { it.copy(pendingJoinRoomId = null) }
+    }
 
     override fun onCleared() {
         super.onCleared()
