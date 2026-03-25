@@ -15,9 +15,50 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      id-token: write
     steps:
-      - uses: anthropics/claude-code-action@beta
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Claude Fix
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          BRANCH="claude-fix-issue-${ISSUE_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          claude --dangerously-skip-permissions -p "
+          GitHubのissue #${ISSUE_NUMBER} を修正してください。
+
+          タイトル: ${ISSUE_TITLE}
+          内容:
+          ${ISSUE_BODY}
+
+          コードを修正してください。修正が完了したらgit addとgit commitまで行ってください。
+          コミットメッセージは日本語で簡潔にお願いします。
+          "
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "fix: issue #${ISSUE_NUMBER} ${ISSUE_TITLE}" \
+            --body "Closes #${ISSUE_NUMBER}
+
+          Claude Codeによる自動修正です。" \
+            --head "$BRANCH" \
+            --base main
