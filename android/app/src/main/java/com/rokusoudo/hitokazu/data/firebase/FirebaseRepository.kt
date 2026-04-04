@@ -221,15 +221,22 @@ class FirebaseRepository {
         val playersSnap = roomRef.collection("players").get().await()
         val nicknameMap = playersSnap.documents.associate { it.id to (it.getString("nickname") ?: "") }
 
+        // 前ラウンドまでの累計スコアを取得
+        @Suppress("UNCHECKED_CAST")
+        val prevTotals: Map<String, Int> = (roomData["cumulativeTotals"] as? Map<String, Any>)
+            ?.mapValues { (it.value as? Long)?.toInt() ?: 0 }
+            ?: emptyMap()
+
         val scores = answers.mapNotNull { doc ->
             val data = doc.data ?: return@mapNotNull null
             if (!data.containsKey("prediction")) return@mapNotNull null
             val targetOption = data["targetOption"] as? String ?: return@mapNotNull null
             val actual = counts[targetOption] ?: 0
             val predicted = (data["prediction"] as? Long)?.toInt() ?: 0
-            val score = calculateScore(actual, predicted)
+            val roundScore = calculateScore(actual, predicted)
+            val totalScore = (prevTotals[doc.id] ?: 0) + roundScore
 
-            doc.reference.update("roundScore", score)
+            doc.reference.update(mapOf("roundScore" to roundScore, "totalScore" to totalScore))
 
             mapOf(
                 "playerId" to doc.id,
@@ -237,25 +244,34 @@ class FirebaseRepository {
                 "targetOption" to targetOption,
                 "predictedCount" to predicted,
                 "actualCount" to actual,
-                "roundScore" to score,
+                "roundScore" to roundScore,
+                "totalScore" to totalScore,
             )
-        }.sortedByDescending { (it["roundScore"] as? Int) ?: 0 }
+        }
+
+        val newTotals = scores.associate {
+            (it["playerId"] as String) to (it["totalScore"] as Int)
+        }
 
         val isLast = currentRound >= totalRounds
 
         if (isLast) {
+            val sortedByTotal = scores.sortedByDescending { (it["totalScore"] as? Int) ?: 0 }
             roomRef.update(
                 mapOf(
                     "status" to "FINISHED",
-                    "finalScores" to scores,
+                    "finalScores" to sortedByTotal,
+                    "cumulativeTotals" to newTotals,
                     "finishedAt" to FieldValue.serverTimestamp(),
                 )
             ).await()
         } else {
+            val sortedByRound = scores.sortedByDescending { (it["roundScore"] as? Int) ?: 0 }
             roomRef.update(
                 mapOf(
                     "status" to "RESULT",
-                    "roundScores" to scores,
+                    "roundScores" to sortedByRound,
+                    "cumulativeTotals" to newTotals,
                     "nextRound" to currentRound + 1,
                 )
             ).await()

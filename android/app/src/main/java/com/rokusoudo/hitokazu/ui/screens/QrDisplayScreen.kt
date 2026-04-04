@@ -136,13 +136,13 @@ fun QrDisplayScreen(
 
         Button(
             onClick = { viewModel.startGame() },
-            enabled = uiState.players.size >= 1,
+            enabled = uiState.players.size >= 2,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
         ) {
             Text(
-                text = if (uiState.players.size < 1) "あと${1 - uiState.players.size}人必要"
+                text = if (uiState.players.size < 2) "あと${2 - uiState.players.size}人必要"
                        else "ゲームを開始する (${uiState.players.size}人)",
                 fontSize = 16.sp,
             )

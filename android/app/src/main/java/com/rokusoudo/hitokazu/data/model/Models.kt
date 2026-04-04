@@ -24,6 +24,7 @@ data class PlayerScore(
     val predictedCount: Int,
     val actualCount: Int,
     val roundScore: Int,
+    val totalScore: Int = 0,
 )
 
 // ── UI State Models ───────────────────────────────────────────
@@ -80,6 +81,7 @@ data class RoomSnapshot(
                         predictedCount = (s["predictedCount"] as? Long)?.toInt() ?: 0,
                         actualCount = (s["actualCount"] as? Long)?.toInt() ?: 0,
                         roundScore = (s["roundScore"] as? Long)?.toInt() ?: 0,
+                        totalScore = (s["totalScore"] as? Long)?.toInt() ?: 0,
                     )
                 } ?: emptyList()
 

@@ -173,13 +173,21 @@ private fun RankingRow(rank: Int, score: PlayerScore, myPlayerId: String) {
                 fontSize = 20.sp,
                 modifier = Modifier.width(40.dp),
             )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = score.nickname.ifEmpty { score.playerId } + if (isMe) "（あなた）" else "",
+                    fontSize = 15.sp,
+                )
+                if (score.totalScore > 0) {
+                    Text(
+                        text = "累計 ${score.totalScore}点",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    )
+                }
+            }
             Text(
-                text = score.nickname.ifEmpty { score.playerId } + if (isMe) "（あなた）" else "",
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "${score.roundScore}点",
+                text = "+${score.roundScore}点",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,

@@ -67,7 +67,7 @@ fun FinishedScreen(
                         textAlign = TextAlign.Center,
                     )
                     Text(
-                        text = "${it.roundScore}点",
+                        text = "${it.totalScore}点",
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -149,7 +149,7 @@ private fun FinalRankingRow(rank: Int, score: PlayerScore, myPlayerId: String) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "${score.roundScore}点",
+                text = "${score.totalScore}点",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
