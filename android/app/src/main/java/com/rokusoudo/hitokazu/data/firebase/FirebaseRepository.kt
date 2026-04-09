@@ -28,7 +28,7 @@ class FirebaseRepository {
     }
 
     // ── ルーム作成 ──────────────────────────────────────────
-    suspend fun createRoom(hostName: String): Result<JoinRoomResponse> = runCatching {
+    suspend fun createRoom(hostName: String, category: QuestionCategory = QuestionCategory.ALL): Result<JoinRoomResponse> = runCatching {
         ensureSignedIn()
         val uid = auth.currentUser!!.uid
         val roomId = generateRoomId()
@@ -41,6 +41,7 @@ class FirebaseRepository {
                 "currentRound" to 0,
                 "totalRounds" to TOTAL_ROUNDS_PER_GAME,
                 "currentQuestion" to null,
+                "category" to category.name,
                 "createdAt" to FieldValue.serverTimestamp(),
             )
         ).await()
@@ -86,7 +87,13 @@ class FirebaseRepository {
 
     // ── ゲーム開始 ──────────────────────────────────────────
     suspend fun startGame(roomId: String): Result<Unit> = runCatching {
-        val questionQueue = QUESTIONS.shuffled().take(TOTAL_ROUNDS_PER_GAME)
+        val roomSnap = db.collection("rooms").document(roomId).get().await()
+        val categoryStr = roomSnap.getString("category")
+        val category = QuestionCategory.fromString(categoryStr)
+
+        val filtered = QUESTIONS.filter { q -> q.tags.any { it in category.tags } }
+        val pool = if (filtered.isEmpty()) QUESTIONS else filtered
+        val questionQueue = pool.shuffled().take(TOTAL_ROUNDS_PER_GAME)
         val firstQuestion = questionQueue[0]
         db.collection("rooms").document(roomId).update(
             mapOf(

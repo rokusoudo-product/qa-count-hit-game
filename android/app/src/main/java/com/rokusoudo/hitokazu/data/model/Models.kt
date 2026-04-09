@@ -1,5 +1,19 @@
 package com.rokusoudo.hitokazu.data.model
 
+// ── Question Category ─────────────────────────────────────────
+
+enum class QuestionCategory(val displayName: String, val tags: List<String>) {
+    FRIEND("フレンド", listOf("friend")),
+    PARTY("パーティー", listOf("party")),
+    DEEP("ディープ", listOf("deep")),
+    ALL("なんでも", listOf("friend", "party", "deep"));
+
+    companion object {
+        fun fromString(value: String?): QuestionCategory =
+            entries.firstOrNull { it.name == value } ?: ALL
+    }
+}
+
 // ── API Response Models ───────────────────────────────────────
 
 data class JoinRoomResponse(
