@@ -141,7 +141,10 @@ snap = room_ref.get()
 ans_snap = round_ref.collection("answers").get()
 check("全員回答した", len(ans_snap) == len(players), f"{len(ans_snap)}/{len(players)}人")
 check("status=PREDICTING", snap.get("status") == "PREDICTING")
-check("answerCounts 集計正確（はい=3）", snap.get("answerCounts.はい") == counts["はい"],
+# snap.get("answerCounts.はい") のドット記法は ASCII のフィールド名しか解釈できず、
+# 日本語キーだと ValueError になる。辞書ごと取得してキーを引く。
+answer_counts = snap.get("answerCounts") or {}
+check("answerCounts 集計正確（はい=3）", answer_counts.get("はい") == counts["はい"],
       f"はい={counts['はい']}, いいえ={counts['いいえ']}")
 
 # ── TEST 5: 予測送信 + 採点 ───────────────────────────────────

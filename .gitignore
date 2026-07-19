@@ -48,4 +48,8 @@ Thumbs.db
 .firebase/
 firebase-debug.log
 firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
 
