@@ -1,9 +1,86 @@
 rules_version = '2';
+
+// 人数当てゲーム（qa-count-hit-game）Firestore セキュリティルール
+//
+// データ構造:
+//   rooms/{roomId}                              ルーム状態・質問・スコア
+//   rooms/{roomId}/players/{uid}                参加者
+//   rooms/{roomId}/rounds/{n}/answers/{uid}     回答・予測・得点
+//
+// 方針:
+//   - 「そのルームの参加者だけ」がルーム配下を読み書きできるようにする。
+//     以前は `if request.auth != null` のみで、匿名認証を通せば誰でも
+//     全ルームを操作できる状態だった。
+//   - ルーム本体の read だけは認証済みユーザーに開放する。joinRoom() が
+//     入室前に存在確認・status 判定・満員判定のため読む必要があるため。
+//     配下の players / rounds は参加者以外には読ませない。
+//
+// 既知の限界:
+//   採点はクライアントが実行し、実行者は「最後に予測を送信したプレイヤー」で
+//   ホストとは限らない（FirebaseRepository.finalizeRound）。この処理が
+//   他プレイヤーの roundScore / totalScore を書くため、answers の update を
+//   自分のドキュメントのみに絞ることができない。
+//   → 同一ルームの参加者によるスコア改ざんはルール層では防げない。
+//     根本的に塞ぐにはゲームロジックを Cloud Functions 側へ移す必要がある。
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 認証済みユーザー（匿名認証含む）はすべてのドキュメントを読み書き可能
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // そのルームに参加済みか（players/{uid} の存在で判定）
+    function isPlayer(roomId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid));
+    }
+
+    function isHost(roomId) {
+      return request.auth != null
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+    }
+
+    match /rooms/{roomId} {
+      // 入室前に存在・status・満員を判定する必要があるため read は認証済みに開放
+      allow read: if request.auth != null;
+
+      // 作成者を hostUid に固定し、他人名義のルーム作成を防ぐ
+      allow create: if request.auth != null
+                    && request.resource.data.hostUid == request.auth.uid;
+
+      // ゲーム進行（status 遷移・採点結果の書き込み）は参加者が行う
+      allow update: if isPlayer(roomId);
+
+      allow delete: if isHost(roomId);
+
+      match /players/{playerId} {
+        allow read: if isPlayer(roomId);
+
+        // 自分のプレイヤー情報のみ作成・更新できる（なりすまし防止）
+        allow create, update: if request.auth != null
+                              && playerId == request.auth.uid;
+
+        // 自分の離脱、またはホストによる参加者削除
+        allow delete: if (request.auth != null && playerId == request.auth.uid)
+                      || isHost(roomId);
+      }
+
+      match /rounds/{roundId} {
+        allow read, write: if isPlayer(roomId);
+
+        match /answers/{playerId} {
+          allow read: if isPlayer(roomId);
+
+          // 回答・予測の送信は「そのルームの参加者」かつ「自分のドキュメント」のみ。
+          // isPlayer() だけだと他人名義で書けてしまい、uid 一致だけだと
+          // 未参加の第三者が回答を差し込めるため、両方を課す。
+          allow create: if isPlayer(roomId)
+                        && playerId == request.auth.uid;
+
+          // 採点処理が他プレイヤーの roundScore / totalScore を書くため、
+          // update は参加者に開放せざるを得ない（上記「既知の限界」を参照）
+          allow update: if isPlayer(roomId);
+
+          allow delete: if isHost(roomId);
+        }
+      }
     }
   }
 }
