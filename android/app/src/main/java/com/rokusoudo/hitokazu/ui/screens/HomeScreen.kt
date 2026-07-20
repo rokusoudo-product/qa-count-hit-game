@@ -12,6 +12,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rokusoudo.hitokazu.data.model.QuestionCategory
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
 @Composable
@@ -27,6 +28,7 @@ fun HomeScreen(
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }
     var hostName by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf(QuestionCategory.ALL) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var joinRoomId by remember { mutableStateOf("") }
@@ -122,18 +124,39 @@ fun HomeScreen(
             onDismissRequest = { showCreateDialog = false },
             title = { Text("ルームを作る") },
             text = {
-                OutlinedTextField(
-                    value = hostName,
-                    onValueChange = { hostName = it },
-                    label = { Text("あなたの名前") },
-                    singleLine = true,
-                )
+                Column {
+                    OutlinedTextField(
+                        value = hostName,
+                        onValueChange = { hostName = it },
+                        label = { Text("あなたの名前") },
+                        singleLine = true,
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "カテゴリを選択",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    QuestionCategory.entries.forEach { category ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            RadioButton(
+                                selected = selectedCategory == category,
+                                onClick = { selectedCategory = category },
+                            )
+                            Text(text = category.displayName, fontSize = 15.sp)
+                        }
+                    }
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (hostName.isNotBlank()) {
-                            viewModel.createRoom(hostName.trim())
+                            viewModel.createRoom(hostName.trim(), selectedCategory)
                             showCreateDialog = false
                         }
                     },

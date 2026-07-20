@@ -26,6 +26,7 @@ data class GameUiState(
     val errorMessage: String? = null,
     val isLoading: Boolean = false,
     val pendingJoinRoomId: String? = null,
+    val selectedCategory: QuestionCategory = QuestionCategory.ALL,
 )
 
 class GameViewModel : ViewModel() {
@@ -39,10 +40,10 @@ class GameViewModel : ViewModel() {
     private var autoAdvanceJob: Job? = null
 
     // ── ルーム作成（ホスト） ──────────────────────────────────
-    fun createRoom(hostName: String) {
+    fun createRoom(hostName: String, category: QuestionCategory = QuestionCategory.ALL) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            repo.createRoom(hostName)
+            repo.createRoom(hostName, category)
                 .onSuccess { res ->
                     _uiState.update {
                         it.copy(
@@ -50,6 +51,7 @@ class GameViewModel : ViewModel() {
                             playerId = res.playerId,
                             nickname = res.nickname,
                             isHost = true,
+                            selectedCategory = category,
                         )
                     }
                     startObserving(res.roomId)
