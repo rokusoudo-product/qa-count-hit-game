@@ -37,6 +37,64 @@
 
 ---
 
+## アーキテクチャ / 構成図
+
+```mermaid
+flowchart TB
+    subgraph User["ユーザー"]
+        direction LR
+        HOST["📱 ホスト<br/>ルーム作成"]
+        GUEST["📱 参加者<br/>QRスキャンで入室"]
+        WEBU["💻 Web参加者<br/>招待リンク"]
+    end
+
+    subgraph AndroidApp["Android アプリ（Kotlin / Jetpack Compose）"]
+        direction TB
+        SCREENS["画面群（9スクリーン）<br/>Home / WaitingRoom / Answering /<br/>Predicting / Result / Finished /<br/>QrDisplay / QrScanner"]
+        ZX["ZXing<br/>QR生成・スキャン"]
+        VM["GameViewModel"]
+        REPO["FirebaseRepository"]
+        SCREENS --- ZX
+        SCREENS <--> VM
+        VM <--> REPO
+    end
+
+    subgraph Firebase["Firebase（GCP）"]
+        direction LR
+        HOSTING["Firebase Hosting<br/>招待ページ<br/>web/public/join/"]
+        AUTH["Firebase Auth<br/>匿名認証"]
+        FS[("Cloud Firestore<br/>rooms/{roomId}/<br/>players・rounds・answers")]
+        FN["Cloud Functions Python 3.12<br/>us-central1<br/>create_room / join_room / start_game /<br/>submit_answer / submit_prediction"]
+    end
+
+    HOST --> SCREENS
+    GUEST --> SCREENS
+    WEBU --> HOSTING
+
+    REPO -->|匿名サインイン| AUTH
+    REPO <==>|直接読み書き＋リアルタイム購読| FS
+    HOSTING -.->|ルームIDを渡す| SCREENS
+    FN -.->|現状クライアントからは未使用| FS
+
+    User ~~~ AndroidApp
+    AndroidApp ~~~ Firebase
+
+    style FN stroke-dasharray: 5 5
+```
+
+### 構成上のポイント
+
+- **リアルタイム同期は Firestore リスナー**（`addSnapshotListener`）で実現。WebSocket やポーリングは使っていません
+- **QRコードは Android 側で完結**。生成（`QrDisplayScreen`）もスキャン（`QrScannerScreen`）もアプリ内で、サーバー生成は不要です
+- **認証は匿名認証**。アカウント登録なしで即プレイできます
+- Cloud Functions（`backend/functions/main.py`）にゲームロジックが実装済みですが、**現在 Android クライアントは Firestore を直接読み書き**しており、Functions は経由していません（図中の破線）
+
+> ⚠️ 現在の `firestore.rules` は「認証済みなら全ドキュメント読み書き可」という緩い設定です。匿名認証を通せば他人のルームも操作できるため、公開前にルーム単位の権限設計が必要です。
+
+詳細は [docs/architecture.md](docs/architecture.md) を参照。
+
+---
+
 ## ディレクトリ構成
 
 ```
@@ -188,7 +246,7 @@ firebase deploy --only firestore:rules
 
 GitHubのissueに問題を報告すると、Claude AIが自動でコードを修正してPRを作成します。
 
-### 構成図
+### ワークフロー図
 
 ```
 開発者
