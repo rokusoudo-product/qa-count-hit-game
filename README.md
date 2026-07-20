@@ -89,7 +89,31 @@ flowchart TB
 - **認証は匿名認証**。アカウント登録なしで即プレイできます
 - Cloud Functions（`backend/functions/main.py`）にゲームロジックが実装済みですが、**現在 Android クライアントは Firestore を直接読み書き**しており、Functions は経由していません（図中の破線）
 
-> ⚠️ 現在の `firestore.rules` は「認証済みなら全ドキュメント読み書き可」という緩い設定です。匿名認証を通せば他人のルームも操作できるため、公開前にルーム単位の権限設計が必要です。
+### セキュリティ（Firestore ルール）
+
+`firestore.rules` は**ルーム単位の権限**で保護しています。「そのルームの参加者だけ」がルーム配下を読み書きでき、無関係な第三者は操作できません。
+
+| パス | read | create | update | delete |
+|---|---|---|---|---|
+| `rooms/{roomId}` | 認証済み | `hostUid == 自分` | 参加者 | ホスト |
+| `players/{uid}` | 参加者 | 自分のみ | 自分のみ | 自分 or ホスト |
+| `rounds/{n}/answers/{uid}` | 参加者 | 参加者かつ自分 | 参加者※ | ホスト |
+
+ルーム本体の read だけ認証済みに開放しているのは、`joinRoom()` が入室前に存在確認・満員判定でルームを読む必要があるためです。配下の `players` / `rounds` は参加者以外に読ませません。
+
+> ⚠️ **※ スコア改ざんは防ぎきれていません。** 採点はクライアントが実行し、実行者は「最後に予測を送信したプレイヤー」でホストとは限りません（`finalizeRound`）。この処理が他プレイヤーの `roundScore` を書くため、`answers` の update を自分のドキュメントに限定できず、**同一ルームの参加者による改ざんはルール層では防げません**。
+>
+> 無関係な第三者による覗き見・妨害は塞げています。根本的に塞ぐにはゲームロジックを Cloud Functions 側へ移す必要があり、Google Play 公開を本格的に狙う段階で再検討する想定です。
+
+ルールのテストは `backend/rules-tests/` にあります（権限マトリクス24件＋実ゲームフロー8件）。
+
+```bash
+cd backend
+npm --prefix rules-tests install
+npm --prefix rules-tests run test:emulator
+```
+
+> `test_game_flow.py` は firebase-admin SDK を使うため**ルールを迂回**します。ルール変更の影響を確認するときは上記のテストを使ってください。
 
 詳細は [docs/architecture.md](docs/architecture.md) を参照。
 
