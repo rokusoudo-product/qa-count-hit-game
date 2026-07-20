@@ -1,0 +1,16 @@
+{
+  "name": "hitokazu-firestore-rules-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "firestore.rules のユニットテスト（Firebase Emulator 使用）",
+  "type": "module",
+  "scripts": {
+    "test": "node --test rules.test.mjs gameflow.test.mjs",
+    "test:emulator": "cd .. && firebase emulators:exec --project hitokazu-game-rules-test --only firestore \"npm --prefix rules-tests test\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.3.0",
+    "firebase-tools": "^14.0.0"
+  }
+}

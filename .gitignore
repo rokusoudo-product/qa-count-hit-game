@@ -53,3 +53,6 @@ ui-debug.log
 database-debug.log
 pubsub-debug.log
 
+# Firestore ルールテスト（package-lock.json は再現性のためコミットする）
+backend/rules-tests/node_modules/
+
