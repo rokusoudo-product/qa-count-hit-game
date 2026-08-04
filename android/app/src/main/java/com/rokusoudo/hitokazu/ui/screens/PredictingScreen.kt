@@ -56,6 +56,10 @@ fun PredictingScreen(
             question?.let {
                 CountdownTimer(
                     totalSeconds = it.predictSeconds,
+                    // このカウントダウンは表示用。実際のフェーズ確定は、ホスト端末の
+                    // GameViewModelがFirestoreのphaseStartedAt（サーバー時刻）を基準に
+                    // 監視しており、未提出者がいてもタイマー満了後に自動で結果を確定させる
+                    // （FirebaseRepository.forceFinalizeFromPredicting）。
                     onTimeout = { },
                     modifier = Modifier.fillMaxWidth(),
                 )

@@ -29,6 +29,9 @@ data class GameUiState(
     val selectedCategory: QuestionCategory = QuestionCategory.ALL,
 )
 
+// 回答・予測フェーズのタイムアウト猶予秒数（通信遅延・端末クロックのズレを吸収するバッファ）
+private const val TIMEOUT_GRACE_SECONDS = 3
+
 class GameViewModel : ViewModel() {
 
     private val repo = FirebaseRepository()
@@ -38,6 +41,12 @@ class GameViewModel : ViewModel() {
     private var roomObserverJob: Job? = null
     private var playerObserverJob: Job? = null
     private var autoAdvanceJob: Job? = null
+    private var answeringTimeoutJob: Job? = null
+    private var predictingTimeoutJob: Job? = null
+
+    // 直近でタイムアウト監視をスケジュールした（フェーズ, ラウンド, フェーズ開始時刻）の組。
+    // 同じ組に対して重複してタイマーを仕込まないようにするためのガード。
+    private var lastScheduledTimeoutKey: String? = null
 
     // ── ルーム作成（ホスト） ──────────────────────────────────
     fun createRoom(hostName: String, category: QuestionCategory = QuestionCategory.ALL) {
@@ -151,6 +160,28 @@ class GameViewModel : ViewModel() {
                             .onFailure { Log.e("GameViewModel", "advanceToNextRound failed", it) }
                     }
                 }
+
+                // ホスト端末が回答・予測フェーズのタイムアウトを監視する。
+                // 1人でも未提出のままタイマーが尽きると、提出済み分だけでフェーズを強制確定する。
+                when (snapshot.status) {
+                    GamePhase.ANSWERING -> {
+                        predictingTimeoutJob?.cancel()
+                        predictingTimeoutJob = null
+                        scheduleAnsweringTimeout(roomId, snapshot)
+                    }
+                    GamePhase.PREDICTING -> {
+                        answeringTimeoutJob?.cancel()
+                        answeringTimeoutJob = null
+                        schedulePredictingTimeout(roomId, snapshot)
+                    }
+                    else -> {
+                        answeringTimeoutJob?.cancel()
+                        predictingTimeoutJob?.cancel()
+                        answeringTimeoutJob = null
+                        predictingTimeoutJob = null
+                        lastScheduledTimeoutKey = null
+                    }
+                }
             }
         }
 
@@ -162,10 +193,55 @@ class GameViewModel : ViewModel() {
         }
     }
 
+    // ── 回答フェーズのタイムアウト監視をスケジュール（ホストのみ） ──
+    // 基準時刻はFirestoreに保存されたサーバー時刻（phaseStartedAt）から算出するため、
+    // 途中参加や画面復帰でこのメソッドが再実行されても残り時間はズレない。
+    private fun scheduleAnsweringTimeout(roomId: String, snapshot: RoomSnapshot) {
+        if (!_uiState.value.isHost) return
+        val question = snapshot.currentQuestion ?: return
+        val startedAt = snapshot.phaseStartedAtMillis ?: return
+
+        val key = "ANSWERING:${snapshot.currentRound}:$startedAt"
+        if (lastScheduledTimeoutKey == key) return
+        lastScheduledTimeoutKey = key
+
+        val deadline = startedAt + (question.answerSeconds + TIMEOUT_GRACE_SECONDS) * 1000L
+        answeringTimeoutJob?.cancel()
+        answeringTimeoutJob = viewModelScope.launch {
+            val waitMs = deadline - System.currentTimeMillis()
+            if (waitMs > 0) delay(waitMs)
+            repo.forceAdvanceFromAnswering(roomId)
+                .onFailure { Log.e("GameViewModel", "forceAdvanceFromAnswering failed", it) }
+        }
+    }
+
+    // ── 予測フェーズのタイムアウト監視をスケジュール（ホストのみ） ──
+    private fun schedulePredictingTimeout(roomId: String, snapshot: RoomSnapshot) {
+        if (!_uiState.value.isHost) return
+        val question = snapshot.currentQuestion ?: return
+        val startedAt = snapshot.phaseStartedAtMillis ?: return
+
+        val key = "PREDICTING:${snapshot.currentRound}:$startedAt"
+        if (lastScheduledTimeoutKey == key) return
+        lastScheduledTimeoutKey = key
+
+        val deadline = startedAt + (question.predictSeconds + TIMEOUT_GRACE_SECONDS) * 1000L
+        predictingTimeoutJob?.cancel()
+        predictingTimeoutJob = viewModelScope.launch {
+            val waitMs = deadline - System.currentTimeMillis()
+            if (waitMs > 0) delay(waitMs)
+            repo.forceFinalizeFromPredicting(roomId)
+                .onFailure { Log.e("GameViewModel", "forceFinalizeFromPredicting failed", it) }
+        }
+    }
+
     fun resetGame() {
         autoAdvanceJob?.cancel()
+        answeringTimeoutJob?.cancel()
+        predictingTimeoutJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
+        lastScheduledTimeoutKey = null
         _uiState.value = GameUiState()
     }
 
@@ -185,6 +261,8 @@ class GameViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         autoAdvanceJob?.cancel()
+        answeringTimeoutJob?.cancel()
+        predictingTimeoutJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
     }

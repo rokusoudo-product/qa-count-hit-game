@@ -63,6 +63,9 @@ data class RoomSnapshot(
     val answerCounts: Map<String, Int>,
     val roundScores: List<PlayerScore>,
     val finalScores: List<PlayerScore>,
+    // 現在のフェーズ（ANSWERING/PREDICTING）が開始したサーバー時刻（epoch millis）。
+    // タイムアウト判定はこの値を基準に行う（端末時計や監視開始タイミングに依存させないため）。
+    val phaseStartedAtMillis: Long?,
 ) {
     companion object {
         @Suppress("UNCHECKED_CAST")
@@ -99,6 +102,8 @@ data class RoomSnapshot(
                     )
                 } ?: emptyList()
 
+            val phaseStartedAtMillis = (data["phaseStartedAt"] as? com.google.firebase.Timestamp)?.toDate()?.time
+
             return RoomSnapshot(
                 status = phase,
                 currentRound = (data["currentRound"] as? Long)?.toInt() ?: 0,
@@ -107,6 +112,7 @@ data class RoomSnapshot(
                 answerCounts = counts,
                 roundScores = parseScores("roundScores"),
                 finalScores = parseScores("finalScores"),
+                phaseStartedAtMillis = phaseStartedAtMillis,
             )
         }
     }

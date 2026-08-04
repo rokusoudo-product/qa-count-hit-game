@@ -184,6 +184,9 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
 
+  // 回答・予測フェーズのタイムアウト猶予秒数（通信遅延・端末クロックのズレを吸収するバッファ）
+  const TIMEOUT_GRACE_SECONDS = 3;
+
   let state = {
     uid: null,
     roomId: null,
@@ -196,6 +199,11 @@
     roomUnsub: null,
     playersUnsub: null,
     autoAdvanceTimer: null,
+    answeringTimeoutTimer: null,
+    predictingTimeoutTimer: null,
+    // 直近でタイムアウト監視をスケジュールした（フェーズ:ラウンド:フェーズ開始時刻）の組。
+    // 同じ組に対して重複してタイマーを仕込まないようにするためのガード。
+    lastScheduledTimeoutKey: null,
   };
 
   // 匿名認証
@@ -308,6 +316,13 @@
       const data = snap.data();
       const phase = data.status;
 
+      // ホストのタイムアウト監視は、画面再描画の間引き（下の早期return）とは独立に
+      // 毎スナップショットで評価する。serverTimestamp()確定時に発火するスナップショットは
+      // phase/currentRoundが変化しないため、間引きされると基準時刻を取得し損ねるため。
+      if (state.isHost) {
+        scheduleHostTimeouts(data);
+      }
+
       if (phase === state.currentPhase && data.currentRound === state.currentRound) return;
       state.currentPhase = phase;
       state.currentRound = data.currentRound;
@@ -390,6 +405,7 @@
       totalRounds: questionQueue.length,
       questionQueue: questionQueue,
       currentQuestion: questionQueue[0], startedAt: serverTimestamp(),
+      phaseStartedAt: serverTimestamp(),
     });
   }
 
@@ -431,15 +447,36 @@
     ]);
 
     if (answers.size >= players.size) {
-      const q = roomData.currentQuestion;
-      const counts = {};
-      q.options.forEach(o => counts[o] = 0);
-      answers.docs.forEach(d => {
-        const a = d.data().answer;
-        if (a in counts) counts[a]++;
-      });
-      await updateDoc(roomRef, { status: 'PREDICTING', answerCounts: counts });
+      await advanceToPredicting(roomRef, roomData, answers.docs);
     }
+  }
+
+  // 提出済みの回答だけを集計してPREDICTINGへ遷移させる共通処理。
+  // 全員回答時（submitAnswer）と、タイムアウト強制確定（forceAdvanceFromAnswering）の両方から呼ばれる。
+  async function advanceToPredicting(roomRef, roomData, answerDocs) {
+    const q = roomData.currentQuestion;
+    const counts = {};
+    q.options.forEach(o => counts[o] = 0);
+    answerDocs.forEach(d => {
+      const a = d.data().answer;
+      if (a in counts) counts[a]++;
+    });
+    await updateDoc(roomRef, { status: 'PREDICTING', answerCounts: counts, phaseStartedAt: serverTimestamp() });
+  }
+
+  // ── 回答フェーズのタイムアウト強制確定（ホストのみ呼び出し） ──
+  // answerSeconds + 猶予秒数が経過しても未提出者がいる場合、提出済みの回答だけで
+  // PREDICTINGへ遷移させる。すでに全員回答済みで遷移済みの場合は何もしない。
+  async function forceAdvanceFromAnswering() {
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomSnap = await getDoc(roomRef);
+    if (!roomSnap.exists()) return;
+    const roomData = roomSnap.data();
+    if (roomData.status !== 'ANSWERING') return; // すでに遷移済み
+
+    const currentRound = roomData.currentRound;
+    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers'));
+    await advanceToPredicting(roomRef, roomData, answers.docs);
   }
 
   function renderPredicting(data) {
@@ -488,6 +525,68 @@
     }
   }
 
+  // ── 予測フェーズのタイムアウト強制確定（ホストのみ呼び出し） ──
+  // predictSeconds + 猶予秒数が経過しても未提出者がいる場合、提出済みの予測だけで
+  // ラウンドを確定させる。すでに全員予測済みで確定済みの場合は何もしない。
+  async function forceFinalizeFromPredicting() {
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomSnap = await getDoc(roomRef);
+    if (!roomSnap.exists()) return;
+    const roomData = roomSnap.data();
+    if (roomData.status !== 'PREDICTING') return; // すでに確定済み
+
+    const currentRound = roomData.currentRound;
+    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers'));
+    await finalizeRound(roomRef, roomData, currentRound, answers.docs);
+  }
+
+  // ── ホスト端末が回答・予測フェーズのタイムアウトを監視する ──
+  // 基準時刻はFirestoreに保存されたサーバー時刻（phaseStartedAt）から算出するため、
+  // 途中参加や画面復帰でこの関数が再実行されても残り時間はズレない。
+  function scheduleHostTimeouts(data) {
+    const startedAtMs = (data.phaseStartedAt && typeof data.phaseStartedAt.toMillis === 'function')
+      ? data.phaseStartedAt.toMillis()
+      : null;
+
+    if (data.status === 'ANSWERING') {
+      clearTimeout(state.predictingTimeoutTimer);
+      state.predictingTimeoutTimer = null;
+
+      const q = data.currentQuestion;
+      if (!q || startedAtMs == null) return;
+      const key = `ANSWERING:${data.currentRound}:${startedAtMs}`;
+      if (state.lastScheduledTimeoutKey === key) return;
+      state.lastScheduledTimeoutKey = key;
+
+      const deadline = startedAtMs + (q.answerSeconds + TIMEOUT_GRACE_SECONDS) * 1000;
+      clearTimeout(state.answeringTimeoutTimer);
+      state.answeringTimeoutTimer = setTimeout(() => {
+        forceAdvanceFromAnswering().catch(err => console.error('forceAdvanceFromAnswering failed', err));
+      }, Math.max(0, deadline - Date.now()));
+    } else if (data.status === 'PREDICTING') {
+      clearTimeout(state.answeringTimeoutTimer);
+      state.answeringTimeoutTimer = null;
+
+      const q = data.currentQuestion;
+      if (!q || startedAtMs == null) return;
+      const key = `PREDICTING:${data.currentRound}:${startedAtMs}`;
+      if (state.lastScheduledTimeoutKey === key) return;
+      state.lastScheduledTimeoutKey = key;
+
+      const deadline = startedAtMs + (q.predictSeconds + TIMEOUT_GRACE_SECONDS) * 1000;
+      clearTimeout(state.predictingTimeoutTimer);
+      state.predictingTimeoutTimer = setTimeout(() => {
+        forceFinalizeFromPredicting().catch(err => console.error('forceFinalizeFromPredicting failed', err));
+      }, Math.max(0, deadline - Date.now()));
+    } else {
+      clearTimeout(state.answeringTimeoutTimer);
+      clearTimeout(state.predictingTimeoutTimer);
+      state.answeringTimeoutTimer = null;
+      state.predictingTimeoutTimer = null;
+      state.lastScheduledTimeoutKey = null;
+    }
+  }
+
   async function finalizeRound(roomRef, roomData, currentRound, answerDocs) {
     const counts = roomData.answerCounts || {};
     const totalRounds = roomData.totalRounds || 5;
@@ -524,6 +623,7 @@
     await updateDoc(doc(db, 'rooms', state.roomId), {
       status: 'ANSWERING', currentRound: nextRound,
       currentQuestion: nextQuestion, answerCounts: {}, roundScores: [],
+      phaseStartedAt: serverTimestamp(),
     });
   }
 
@@ -588,8 +688,11 @@
     if (state.roomUnsub) state.roomUnsub();
     if (state.playersUnsub) state.playersUnsub();
     clearTimeout(state.autoAdvanceTimer);
+    clearTimeout(state.answeringTimeoutTimer);
+    clearTimeout(state.predictingTimeoutTimer);
     state = { ...state, roomId: null, isHost: false, nickname: '', selectedAnswer: null,
-      predictionSent: false, currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null };
+      predictionSent: false, currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null,
+      answeringTimeoutTimer: null, predictingTimeoutTimer: null, lastScheduledTimeoutKey: null };
     showScreen('home');
   }
 </script>
