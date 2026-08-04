@@ -115,6 +115,17 @@ npm --prefix rules-tests run test:emulator
 
 > `test_game_flow.py` は firebase-admin SDK を使うため**ルールを迂回**します。ルール変更の影響を確認するときは上記のテストを使ってください。
 
+### CI（自動テスト）
+
+`main` 宛の Pull Request と `main` への push で [`.github/workflows/ci.yml`](.github/workflows/ci.yml) が自動実行されます。
+
+- `backend/test_logic.py`（採点ロジック単体テスト）
+- `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス24件＋実ゲームフロー8件、Firebase Emulator上で実行）
+- lint（Python: flake8）
+
+テストが1件でも失敗するとCIが失敗（レッド）になり、PR上にステータスとして表示されます。
+`test_functions.py` は本番Firestoreに直接書き込むスクリプトのため、CIには含めていません（手動実行のみ）。
+
 詳細は [docs/architecture.md](docs/architecture.md) を参照。
 
 ---
