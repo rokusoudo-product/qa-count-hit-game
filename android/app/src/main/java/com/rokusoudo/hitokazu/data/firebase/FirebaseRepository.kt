@@ -103,6 +103,7 @@ class FirebaseRepository {
                 "questionQueue" to questionQueue.map { it.toMap() },
                 "currentQuestion" to firstQuestion.toMap(),
                 "startedAt" to FieldValue.serverTimestamp(),
+                "phaseStartedAt" to FieldValue.serverTimestamp(),
             )
         ).await()
     }
@@ -133,18 +134,44 @@ class FirebaseRepository {
         val answers = roundRef.collection("answers").get().await()
 
         if (answers.size() >= players.size()) {
-            val currentQuestion = roomData["currentQuestion"] as? Map<*, *>
-            val options = (currentQuestion?.get("options") as? List<*>)?.map { it.toString() } ?: emptyList()
-            val counts = options.associateWith { opt ->
-                answers.documents.count { doc -> doc.getString("answer") == opt }
-            }
-            roomRef.update(
-                mapOf(
-                    "status" to "PREDICTING",
-                    "answerCounts" to counts,
-                )
-            ).await()
+            advanceToPredicting(roomRef, roomData, answers)
         }
+    }
+
+    // ── 回答フェーズのタイムアウト強制確定（ホスト端末が呼び出す） ──
+    // answerSeconds + 猶予秒数が経過しても未提出者がいる場合、提出済みの回答だけで
+    // PREDICTING へ遷移させる。すでに全員回答済みで遷移済みの場合は何もしない。
+    suspend fun forceAdvanceFromAnswering(roomId: String): Result<Unit> = runCatching {
+        val roomRef = db.collection("rooms").document(roomId)
+        val roomSnap = roomRef.get().await()
+        val roomData = roomSnap.data ?: return@runCatching
+
+        if (roomData["status"] != "ANSWERING") return@runCatching // すでに遷移済み
+
+        val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: return@runCatching
+        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val answers = roundRef.collection("answers").get().await()
+
+        advanceToPredicting(roomRef, roomData, answers)
+    }
+
+    private suspend fun advanceToPredicting(
+        roomRef: com.google.firebase.firestore.DocumentReference,
+        roomData: Map<String, Any>,
+        answers: com.google.firebase.firestore.QuerySnapshot,
+    ) {
+        val currentQuestion = roomData["currentQuestion"] as? Map<*, *>
+        val options = (currentQuestion?.get("options") as? List<*>)?.map { it.toString() } ?: emptyList()
+        val counts = options.associateWith { opt ->
+            answers.documents.count { doc -> doc.getString("answer") == opt }
+        }
+        roomRef.update(
+            mapOf(
+                "status" to "PREDICTING",
+                "answerCounts" to counts,
+                "phaseStartedAt" to FieldValue.serverTimestamp(),
+            )
+        ).await()
     }
 
     // ── 予測送信 ────────────────────────────────────────────
@@ -182,6 +209,23 @@ class FirebaseRepository {
         }
     }
 
+    // ── 予測フェーズのタイムアウト強制確定（ホスト端末が呼び出す） ──
+    // predictSeconds + 猶予秒数が経過しても未提出者がいる場合、提出済みの予測だけで
+    // ラウンドを確定させる。すでに全員予測済みで確定済みの場合は何もしない。
+    suspend fun forceFinalizeFromPredicting(roomId: String): Result<Unit> = runCatching {
+        val roomRef = db.collection("rooms").document(roomId)
+        val roomSnap = roomRef.get().await()
+        val roomData = roomSnap.data ?: return@runCatching
+
+        if (roomData["status"] != "PREDICTING") return@runCatching // すでに確定済み
+
+        val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: return@runCatching
+        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val answers = roundRef.collection("answers").get().await()
+
+        finalizeRound(roomRef, roomData, currentRound, answers.documents)
+    }
+
     // ── 次のラウンドへ進む（ホストが呼び出す） ─────────────
     @Suppress("UNCHECKED_CAST")
     suspend fun advanceToNextRound(roomId: String): Result<Unit> = runCatching {
@@ -208,6 +252,7 @@ class FirebaseRepository {
                 "currentQuestion" to nextQuestion.toMap(),
                 "answerCounts" to emptyMap<String, Int>(),
                 "roundScores" to emptyList<Any>(),
+                "phaseStartedAt" to FieldValue.serverTimestamp(),
             )
         ).await()
     }

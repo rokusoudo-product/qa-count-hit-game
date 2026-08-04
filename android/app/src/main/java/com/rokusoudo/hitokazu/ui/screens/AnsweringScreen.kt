@@ -51,7 +51,11 @@ fun AnsweringScreen(
             question?.let {
                 CountdownTimer(
                     totalSeconds = it.answerSeconds,
-                    onTimeout = { /* タイムアウトはサーバー側で処理 */ },
+                    // このカウントダウンは表示用。実際のフェーズ確定は、ホスト端末の
+                    // GameViewModelがFirestoreのphaseStartedAt（サーバー時刻）を基準に
+                    // 監視しており、未提出者がいてもタイマー満了後に自動でPREDICTINGへ
+                    // 遷移させる（FirebaseRepository.forceAdvanceFromAnswering）。
+                    onTimeout = { },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
