@@ -25,6 +25,11 @@ jobs:
       - name: Run logic unit tests
         run: python3 backend/test_logic.py
 
+      # 質問マスタ（shared/questions.json）と Kotlin/JS/Python 3実装の同期を検証する（Issue #16）。
+      # generate_questions.py --check を内部で呼ぶため、正本を更新して再生成し忘れた場合に失敗する。
+      - name: Run question master sync test
+        run: python3 backend/test_questions_sync.py
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
