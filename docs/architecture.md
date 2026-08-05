@@ -175,8 +175,8 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 ```
 
 各質問は `tags`（`friend` / `party` / `deep`）を持ち、ルームの `category` で絞り込まれる。
-
-> ⚠️ カテゴリによる絞り込みは**現状 Android 側にしか実装がない**。Web クライアントは全問から抽選する。是正は Issue #12。
+カテゴリによる絞り込みは Android / Web / Cloud Functions(Python) の3実装すべてに同一仕様
+（`category` に対応する `tags` で絞り込み、該当0件なら全問にフォールバック）で入っている（Issue #12）。
 
 ---
 

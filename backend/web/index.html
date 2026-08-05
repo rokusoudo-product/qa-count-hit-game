@@ -27,14 +27,17 @@
     h2 { font-size: 18px; margin-bottom: 16px; color: #333; }
     .screen { display: none; }
     .screen.active { display: block; }
-    input {
+    input, select {
       width: 100%;
       padding: 12px;
       border: 1px solid #ddd;
       border-radius: 8px;
       font-size: 16px;
       margin-bottom: 12px;
+      font-family: inherit;
+      background: white;
     }
+    label.field-label { display: block; margin-bottom: 6px; color: #555; font-size: 14px; }
     button {
       width: 100%;
       padding: 14px;
@@ -105,6 +108,13 @@
   <div id="screen-create" class="screen">
     <div id="create-error" class="error" style="display:none"></div>
     <input id="host-name" type="text" placeholder="ホスト名" maxlength="20">
+    <label class="field-label" for="category-select">質問カテゴリ</label>
+    <select id="category-select">
+      <option value="FRIEND">フレンド</option>
+      <option value="PARTY">パーティー</option>
+      <option value="DEEP">ディープ</option>
+      <option value="ALL" selected>なんでも</option>
+    </select>
     <button class="btn-primary" onclick="createRoom()">ルームを作成</button>
     <button class="btn-secondary" onclick="showScreen('home')">戻る</button>
   </div>
@@ -245,6 +255,9 @@
     if (!hostName) return showError('create-error', 'ホスト名を入力してください');
     hideError('create-error');
 
+    const categorySelect = document.getElementById('category-select');
+    const category = (categorySelect && categorySelect.value) || 'ALL';
+
     const roomId = generateRoomId();
     state.roomId = roomId;
     state.isHost = true;
@@ -253,7 +266,7 @@
     await setDoc(doc(db, 'rooms', roomId), {
       hostName, hostUid: state.uid,
       status: 'WAITING', currentRound: 0, totalRounds: 5,
-      currentQuestion: null, createdAt: serverTimestamp(),
+      currentQuestion: null, category, createdAt: serverTimestamp(),
     });
     await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
       nickname: hostName, isHost: true, joinedAt: serverTimestamp(),
@@ -391,6 +404,19 @@
 
   const TOTAL_ROUNDS_PER_GAME = 5;
 
+  // ルーム作成時に選べる質問カテゴリと、対応する質問タグ。
+  // Android の QuestionCategory（data/model/Models.kt）と同一の表記・絞り込み仕様にすること（Issue #12）。
+  const CATEGORY_TAGS = {
+    FRIEND: ['friend'],
+    PARTY: ['party'],
+    DEEP: ['deep'],
+    ALL: ['friend', 'party', 'deep'],
+  };
+
+  function categoryTags(categoryName) {
+    return CATEGORY_TAGS[categoryName] || CATEGORY_TAGS.ALL;
+  }
+
   function shuffleArray(arr) {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -401,8 +427,14 @@
   }
 
   async function startGame() {
-    const questionQueue = shuffleArray(ALL_QUESTIONS).slice(0, TOTAL_ROUNDS_PER_GAME);
-    await updateDoc(doc(db, 'rooms', state.roomId), {
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomSnap = await getDoc(roomRef);
+    const roomData = roomSnap.data() || {};
+    const tags = categoryTags(roomData.category);
+    const filtered = ALL_QUESTIONS.filter(q => q.tags.some(t => tags.includes(t)));
+    const pool = filtered.length > 0 ? filtered : ALL_QUESTIONS;
+    const questionQueue = shuffleArray(pool).slice(0, TOTAL_ROUNDS_PER_GAME);
+    await updateDoc(roomRef, {
       status: 'ANSWERING', currentRound: 1,
       totalRounds: questionQueue.length,
       questionQueue: questionQueue,
