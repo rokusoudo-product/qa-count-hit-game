@@ -150,7 +150,7 @@ hitokazu-game/
 │   ├── firestore.indexes.json
 │   └── web/
 │       └── index.html     # Webクライアント（ブラウザ参加用）
-└── docs/                  # 仕様・バックログ
+└── docs/                  # 仕様・要件（バックログは GitHub Issue が正）
 ```
 
 ---

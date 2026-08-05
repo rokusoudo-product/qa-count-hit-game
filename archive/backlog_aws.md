@@ -1,7 +1,19 @@
-# プロダクトバックログ
+> # ⚠️ これは AWS 時代の記録です
+>
+> **現行のバックログは [GitHub Issue](https://github.com/rokusoudo-product/qa-count-hit-game/issues) を正とします。**
+> 本ファイルの内容を現在の計画・進捗として参照しないでください。
+>
+> - 2026-03-20 に AWS から Firebase へ移行したため、以下のタスク（DynamoDB / Terraform / API Gateway WebSocket / OkHttp WebSocket 前提）は**現行構成と対応しません**
+> - 「完了」と書かれていても実態と一致しない項目があります。たとえば `AND-011 接続エラー・再接続処理` は「完了」扱いですが**未実装**です（Issue #18）
+> - 2026-08-06 に `docs/backlog.md` から本ファイルへ退避しました（Issue #19）。GitHub Issue との二重管理を解消するためです
+
+---
+
+# プロダクトバックログ（AWS 時代・凍結）
 
 **作成日**: 2026-03-20
-**最終更新**: 2026-03-20
+**最終更新**: 2026-03-20（以降更新なし）
+**凍結日**: 2026-08-06
 
 優先度: 🔴 Must / 🟡 Should / 🟢 Could
 

@@ -15,7 +15,10 @@
 ## 技術スタック
 
 > 2026-03-20 に **AWS から Firebase へ移行済み**。AWS 実装（Terraform / Lambda / DynamoDB）は
-> `archive/` に退避してあり、現行構成では使用しない。詳細は `docs/architecture.md`（v2.0）。
+> `archive/` に退避してあり、現行構成では使用しない。詳細は `docs/architecture.md`（v3.0）。
+>
+> ⚠️ **Cloud Functions は実装済みだが、Android・Web のどちらからも呼び出していない。**
+> クライアントは Firestore を直接読み書きし、採点・フェーズ遷移もクライアント側で行う。
 
 - **フロント**: Android / Kotlin / Jetpack Compose（Navigation Compose + ViewModel）
 - **バックエンド**: Python 3.12 / Firebase Cloud Functions（HTTPS 関数・us-central1）
@@ -30,14 +33,14 @@
 ## エージェント構成
 | エージェント | 役割 |
 |------------|------|
-| POエージェント | 要件定義・仕様策定・バックログ管理 |
+| POエージェント | 要件定義・仕様策定・GitHub Issue の起票と優先度づけ |
 | エンジニアエージェント | 設計・実装・インフラ構築 |
 
 ## POエージェントへの指示
 あなたは「人数当てゲーム」のプロダクトオーナーです。
 このディレクトリ（/home/zakis/hitokazu_game）を作業場所として、
-要件定義・ユーザーストーリー・バックログ管理を担当してください。
-仕様はdocs/ディレクトリにMarkdownで管理してください。
+要件定義・ユーザーストーリーの策定と GitHub Issue の管理を担当してください。
+仕様はdocs/ディレクトリにMarkdownで管理し、バックログは GitHub Issue を正としてください。
 
 ## エンジニアエージェントへの指示
 あなたは「人数当てゲーム」のエンジニアです。
@@ -52,12 +55,11 @@ POの仕様（docs/）をもとに設計・実装を担当してください。
 ```
 hitokazu_game/                    # リポジトリ名は qa-count-hit-game
 ├── CLAUDE.md                     # このファイル（プロジェクト共通情報）
-├── docs/                         # PO管理：仕様・要件・バックログ
-│   ├── architecture.md           #   システム構成（v2.0 / Firebase）
+├── docs/                         # PO管理：仕様・要件（バックログは GitHub Issue が正）
+│   ├── architecture.md           #   システム構成（v3.0 / Firebase）
 │   ├── firebase_setup.md
-│   ├── requirements.md
-│   ├── user_stories.md
-│   └── backlog.md
+│   ├── requirements.md           #   要件定義（v2.0）
+│   └── user_stories.md
 ├── shared/
 │   └── questions.json            #   質問マスタの正本（36問。Issue #16）
 ├── scripts/
@@ -76,7 +78,14 @@ hitokazu_game/                    # リポジトリ名は qa-count-hit-game
 │   └── .../data/questions/Questions.kt  # 質問マスタ（自動生成・直接編集しない）
 ├── web/                          # Firebase Hosting（招待リンク）
 └── archive/                      # AWS 旧実装（参照のみ・使用しない）
+    └── backlog_aws.md            #   AWS 時代のバックログ（凍結。現行は GitHub Issue）
 ```
+
+### バックログの正本は GitHub Issue
+
+プロダクトバックログは **[GitHub Issue](https://github.com/rokusoudo-product/qa-count-hit-game/issues) を正**とする。
+`docs/backlog.md` は GitHub Issue と役割が重複し二重管理になっていたため、2026-08-06 に廃止して
+`archive/backlog_aws.md` へ凍結退避した（Issue #19）。ラベル運用は `ISSUE_WORKFLOW.md` に従う。
 
 ### 質問マスタ（36問）の正本管理（Issue #16）
 

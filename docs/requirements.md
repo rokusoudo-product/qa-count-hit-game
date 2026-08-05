@@ -2,7 +2,8 @@
 
 **プロジェクト名**: 人数当てゲーム
 **作成日**: 2026-03-20
-**バージョン**: 1.0
+**最終更新**: 2026-08-06（AWS 前提の記述を現行 Firebase 構成に是正。Issue #19）
+**バージョン**: 2.0
 **作成者**: POエージェント（株式会社六創堂）
 
 ---
@@ -57,8 +58,9 @@
 - 最終的なランキングを表示
 
 ### 3.5 リアルタイム通信
-- WebSocket（AWS API Gateway）を使ったリアルタイム同期
+- Cloud Firestore のリアルタイムリスナー（`addSnapshotListener`）による同期。WebSocket もポーリングも使わない
 - 参加者の入退室・回答状況をリアルタイム反映
+- クライアント（Android / Web）は Firestore を**直接読み書き**する。Cloud Functions は実装済みだが経由していない（`docs/architecture.md` 参照）
 
 ---
 
@@ -66,20 +68,24 @@
 
 | 項目 | 要件 |
 |------|------|
-| プラットフォーム | Android（minSdk 26 / API Level 26以上） |
+| プラットフォーム | Android（minSdk 26 / API Level 26以上）＋ Web ブラウザ（参加・ホストとも可） |
 | 同時接続数 | 1ルームあたり最大20人 |
 | レスポンス | 回答反映は3秒以内 |
-| 可用性 | AWS Lambda + DynamoDB（サーバーレス構成） |
-| セキュリティ | ルームIDはUUID、外部から推測不可 |
-| コスト | AWS無料枠での運用を優先 |
+| 可用性 | Firebase（Cloud Firestore + Authentication + Hosting）のマネージドサービスに依拠する |
+| セキュリティ | ルームIDは8桁のランダム文字列（`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` の32文字集合。誤読しやすい `I`/`O`/`0`/`1` を除外）。Firestore セキュリティルールでルーム単位に権限を絞る |
+| コスト | Firebase（GCP）無料枠での運用を優先 |
+
+> ⚠️ 採点処理をクライアントが実行する構成のため、**同一ルームの参加者によるスコア改ざんはセキュリティルールでは防げない**。無関係な第三者による覗き見・妨害は塞いである。詳細と対処方針は `docs/architecture.md`「セキュリティ」を参照。
 
 ---
 
-## 5. スコープ外（v1.0）
+## 5. スコープ外
+
+2026-08-06 時点でも据え置き（代表判断）。
 
 - iOSアプリ対応
 - アカウント登録・ログイン機能
-- カスタム質問作成（初期はプリセット質問のみ）
+- カスタム質問作成（プリセット質問のみ。質問マスタは `shared/questions.json` の36問）
 - 音声・動画チャット
 - 広告掲載
 
@@ -88,5 +94,13 @@
 ## 6. 制約事項
 
 - Google Playポリシー準拠
-- 個人情報は収集しない（ニックネームのみ）
-- AWS東京リージョン使用
+- 個人情報は収集しない（ニックネームと Firebase 匿名認証の uid のみ）
+- Cloud Functions のリージョンは `us-central1`（`backend/functions/main.py`）
+
+---
+
+## 7. バックログ管理
+
+現行のバックログは **GitHub Issue を正**とする（https://github.com/rokusoudo-product/qa-count-hit-game/issues）。
+
+かつて `docs/backlog.md` で管理していたが、GitHub Issue と役割が重複し二重管理になっていたため 2026-08-06 に廃止した（Issue #19）。AWS 時代の記録は `archive/backlog_aws.md` に退避してある。
