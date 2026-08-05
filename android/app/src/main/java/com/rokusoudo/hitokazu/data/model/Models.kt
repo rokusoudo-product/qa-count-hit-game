@@ -31,6 +31,17 @@ data class Question(
     val tags: List<String> = emptyList(),
 )
 
+// Firestore へ書き込む際のマップ表現。質問マスタ（data/questions/Questions.kt）は
+// Issue #16 で shared/questions.json から生成されるようになった。
+fun Question.toMap(): Map<String, Any> = mapOf(
+    "questionId" to questionId,
+    "text" to text,
+    "options" to options,
+    "answerSeconds" to answerSeconds,
+    "predictSeconds" to predictSeconds,
+    "tags" to tags,
+)
+
 data class PlayerScore(
     val playerId: String,
     val nickname: String = "",

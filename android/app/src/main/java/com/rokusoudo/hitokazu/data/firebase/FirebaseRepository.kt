@@ -6,6 +6,7 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.rokusoudo.hitokazu.data.model.*
+import com.rokusoudo.hitokazu.data.questions.QUESTIONS
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -235,7 +236,7 @@ class FirebaseRepository {
         val nextRound = (roomData["nextRound"] as? Long)?.toInt() ?: error("次のラウンド情報なし")
         val questionQueue = roomData["questionQueue"] as? List<Map<String, Any>>
         val nextQuestion = questionQueue?.getOrNull(nextRound - 1)?.let { q ->
-            QuestionData(
+            Question(
                 questionId = q["questionId"] as? String ?: "",
                 text = q["text"] as? String ?: "",
                 options = (q["options"] as? List<*>)?.map { it.toString() } ?: emptyList(),
@@ -364,63 +365,3 @@ private fun calculateScore(actual: Int, predicted: Int): Int =
     maxOf(0, 100 - kotlin.math.abs(predicted - actual) * 20)
 
 private const val TOTAL_ROUNDS_PER_GAME = 5
-
-private data class QuestionData(
-    val questionId: String,
-    val text: String,
-    val options: List<String>,
-    val answerSeconds: Int = 30,
-    val predictSeconds: Int = 20,
-    val tags: List<String> = emptyList(),
-) {
-    fun toMap() = mapOf(
-        "questionId" to questionId,
-        "text" to text,
-        "options" to options,
-        "answerSeconds" to answerSeconds,
-        "predictSeconds" to predictSeconds,
-        "tags" to tags,
-    )
-}
-
-private val QUESTIONS = listOf(
-    // ── friend: アイスブレーキング ────────────────────────────
-    QuestionData("f001", "自分は猫派だ（犬よりも猫が好き）", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f002", "自分の出身地は田舎だと思っている", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f003", "ディズニーよりジブリ派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f004", "自分は朝型人間だと思う", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f005", "運転免許を持っている", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f006", "海外に行ったことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f007", "泳ぐのが得意だ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f008", "辛い食べ物が得意だ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f009", "読書が好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f010", "自炊を週3回以上している", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f011", "スポーツを定期的にしている", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f012", "ゲームが好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f013", "SNSを毎日チェックする", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f014", "カラオケで歌うのが好きだ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f015", "自分は方向音痴だと思う", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f016", "初対面の人とすぐ仲良くなれる方だ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f017", "コーヒーよりお茶派だ", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f018", "映画を月1回以上見る", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f019", "犬を飼ったことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
-    QuestionData("f020", "一人旅をしたことがある", listOf("はい", "いいえ"), tags = listOf("friend")),
-    // ── party: パーティー向け ─────────────────────────────────
-    QuestionData("p001", "自分は右隣の人よりイケてると思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p002", "このグループの中で一番早起きなのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p003", "このメンバーの中で一番食べるのが速いのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p004", "今日このメンバーの中で一番おしゃれをしてきたのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p005", "このメンバーの中で一番歌が上手いのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p006", "このグループで一番旅行好きなのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p007", "このメンバーの中で一番方向音痴なのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    QuestionData("p008", "このメンバーの中で一番スマホを見る時間が長いのは自分だと思う", listOf("はい", "いいえ"), tags = listOf("party")),
-    // ── deep: 仲が良い関係性向け・成人向け ───────────────────
-    QuestionData("d001", "お酒で失敗したことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d002", "告白したことがある（した側）", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d003", "バイトや仕事を無断でサボったことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d004", "徹夜で遊んだことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d005", "嘘の理由で欠席・欠勤したことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d006", "二日酔いになったことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d007", "初対面の人に一目惚れしたことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-    QuestionData("d008", "酔った勢いで連絡してしまったことがある", listOf("はい", "いいえ"), tags = listOf("deep")),
-)

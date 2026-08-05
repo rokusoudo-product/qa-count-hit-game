@@ -58,17 +58,44 @@ hitokazu_game/                    # リポジトリ名は qa-count-hit-game
 │   ├── requirements.md
 │   ├── user_stories.md
 │   └── backlog.md
+├── shared/
+│   └── questions.json            #   質問マスタの正本（36問。Issue #16）
+├── scripts/
+│   └── generate_questions.py     #   shared/questions.json → Kotlin/JS/Python への生成スクリプト
 ├── backend/                      # エンジニア：Firebase
 │   ├── firebase.json             #   Functions / Firestore / Hosting / Emulator
 │   ├── firestore.rules
 │   ├── functions/main.py         #   Cloud Functions 本体
+│   ├── functions/questions.py    #   質問マスタ（自動生成・直接編集しない）
+│   ├── web/index.html            #   Webクライアント（質問マスタは生成マーカーで自動反映）
 │   ├── test_logic.py             #   ロジック単体（Firestore 非依存）
+│   ├── test_questions_sync.py    #   質問マスタの正本と3実装の同期テスト（Firestore 非依存）
 │   ├── test_game_flow.py         #   Emulator 統合テスト
 │   └── test_functions.py         #   ⚠️ 本番 Firestore に直接書き込む
 ├── android/                      # エンジニア：Kotlin / Compose
+│   └── .../data/questions/Questions.kt  # 質問マスタ（自動生成・直接編集しない）
 ├── web/                          # Firebase Hosting（招待リンク）
 └── archive/                      # AWS 旧実装（参照のみ・使用しない）
 ```
+
+### 質問マスタ（36問）の正本管理（Issue #16）
+
+質問マスタは `shared/questions.json` を単一の正本とし、以下の3実装は
+そこから **生成** される（直接編集しないこと）。
+
+- `android/app/src/main/java/com/rokusoudo/hitokazu/data/questions/Questions.kt`
+- `backend/functions/questions.py`
+- `backend/web/index.html`（`// GENERATED:QUESTIONS:START` 〜 `:END` の区間のみ）
+
+質問を追加・変更する場合は `shared/questions.json` を編集してから、
+
+```bash
+python3 scripts/generate_questions.py         # 3実装に反映する
+python3 scripts/generate_questions.py --check # 同期しているか検証するだけ（CI で使用）
+python3 backend/test_questions_sync.py        # 正本と3実装の内容一致を検証する
+```
+
+を実行すること。
 
 ## テスト実行
 
