@@ -120,8 +120,9 @@ npm --prefix rules-tests run test:emulator
 `main` 宛の Pull Request と `main` への push で [`.github/workflows/ci.yml`](.github/workflows/ci.yml) が自動実行されます。
 
 - `backend/test_logic.py`（採点ロジック単体テスト）
+- `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
 - `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス24件＋実ゲームフロー8件、Firebase Emulator上で実行）
-- lint（Python: flake8）
+- lint（Python: flake8 / JS: rules-tests に設定があれば実行）
 
 テストが1件でも失敗するとCIが失敗（レッド）になり、PR上にステータスとして表示されます。
 `test_functions.py` は本番Firestoreに直接書き込むスクリプトのため、CIには含めていません（手動実行のみ）。
@@ -177,21 +178,36 @@ Android / ブラウザ
 ```json
 {
   "hostName": "string",
+  "hostUid": "string",
   "status": "WAITING | ANSWERING | PREDICTING | RESULT | FINISHED",
   "currentRound": 1,
   "totalRounds": 5,
+  "category": "ALL | FRIEND | PARTY | DEEP",
   "currentQuestion": {
-    "questionId": "q001",
+    "questionId": "f001",
     "text": "犬を飼ったことがある？",
     "options": ["はい", "いいえ"],
     "answerSeconds": 30,
-    "predictSeconds": 20
+    "predictSeconds": 20,
+    "tags": ["friend"]
   },
+  "questionQueue": [...],
   "answerCounts": { "はい": 3, "いいえ": 2 },
   "roundScores": [...],
-  "finalScores": [...]
+  "finalScores": [...],
+  "cumulativeTotals": { "<playerId>": 240 },
+  "nextRound": 2,
+  "phaseStartedAt": "timestamp",
+  "createdAt": "timestamp",
+  "startedAt": "timestamp",
+  "finishedAt": "timestamp"
 }
 ```
+
+- `hostUid` は Firestore ルールのホスト判定に使います
+- `phaseStartedAt` は**タイムアウト判定の基準となるサーバー時刻**です（下記「ゲームの状態遷移」）
+- 各フィールドの型・書き込み箇所を含む網羅的な一覧は [docs/architecture.md](docs/architecture.md#firestore-データ構造) にあります。
+  実装を変更するときはそちらを正としてください
 
 ---
 
@@ -206,17 +222,39 @@ WAITING → ANSWERING → PREDICTING → RESULT → ANSWERING → ...→ FINISHE
 - ホストが10秒後に自動で次ラウンド（`ANSWERING`）へ進行
 - 最終ラウンド終了後は `FINISHED` へ遷移
 
+### タイムアウトによる遷移
+
+**全員が提出しなくてもフェーズは進みます。** 1人が離席・通信断を起こしただけでゲームが止まらないようにするためです。
+
+- `ANSWERING` は `answerSeconds`（既定30秒）＋猶予3秒、`PREDICTING` は `predictSeconds`（既定20秒）＋猶予3秒が経過すると、**ホスト端末が提出済みの分だけで確定**させて次のフェーズへ進めます
+- 判定の基準時刻は端末のローカル時計ではなく、ルームドキュメントの `phaseStartedAt`（サーバー時刻）から算出します。途中参加・画面復帰した端末でも基準がズレません
+- 未提出者は当該ラウンドのスコア集計から除外されます
+
 ---
 
-## 質問リスト（5問）
+## 質問マスタ（36問）
 
-| No. | 質問 |
-|-----|------|
-| 1 | 犬を飼ったことがある？ |
-| 2 | 朝ごはんを毎日食べる？ |
-| 3 | 運転免許を持っている？ |
-| 4 | 海外に行ったことがある？ |
-| 5 | コーヒーを毎日飲む？ |
+質問は全部で **36問**あり、**1ゲームではそこから5問**が抽選されて出題されます（`TOTAL_ROUNDS_PER_GAME = 5`）。
+
+質問の内容は [`shared/questions.json`](shared/questions.json) が**単一の正本**です。README には転記しません（二重管理を避けるため）。
+
+各質問はカテゴリタグを持ち、ルーム作成時に選んだカテゴリで絞り込まれます。
+
+| カテゴリ | タグ | 用途 |
+|---|---|---|
+| なんでも | `friend` + `party` + `deep` | 既定。全36問から抽選 |
+| フレンド | `friend` | 気軽な話題 |
+| パーティー | `party` | 場を盛り上げる話題 |
+| ディープ | `deep` | 関係性が近い相手・成人向けの話題 |
+
+質問を追加・変更するときは `shared/questions.json` を編集し、生成スクリプトで Kotlin / JavaScript / Python の3実装へ反映します。
+
+```bash
+python3 scripts/generate_questions.py         # 3実装へ反映
+python3 scripts/generate_questions.py --check # 同期しているか検証（CI で実行）
+```
+
+生成先（`data/questions/Questions.kt` / `backend/functions/questions.py` / `backend/web/index.html` の生成マーカー区間）は**直接編集しないでください**。詳細は [docs/architecture.md](docs/architecture.md) を参照。
 
 ---
 
