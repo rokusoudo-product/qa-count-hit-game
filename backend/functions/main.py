@@ -21,6 +21,27 @@ TOTAL_ROUNDS_PER_GAME = 5
 # scripts/generate_questions.py を実行すること。
 from questions import QUESTIONS  # noqa: E402  (initialize_app() より後に import する既存構成を踏襲)
 
+# ルーム作成時に選べる質問カテゴリと、対応する質問タグ。
+# Android の QuestionCategory（data/model/Models.kt）・Web（backend/web/index.html）と
+# 同一の表記・絞り込み仕様にすること（Issue #12）。
+CATEGORY_TAGS = {
+    "FRIEND": ["friend"],
+    "PARTY": ["party"],
+    "DEEP": ["deep"],
+    "ALL": ["friend", "party", "deep"],
+}
+
+
+def _normalize_category(value) -> str:
+    name = (value or "ALL").strip().upper()
+    return name if name in CATEGORY_TAGS else "ALL"
+
+
+def _filter_questions_by_category(category: str) -> list:
+    tags = CATEGORY_TAGS.get(category, CATEGORY_TAGS["ALL"])
+    filtered = [q for q in QUESTIONS if any(t in tags for t in q.get("tags", []))]
+    return filtered if filtered else QUESTIONS
+
 
 def _ok(data: dict):
     return https_fn.Response(json.dumps(data), status=200, content_type="application/json")
@@ -39,6 +60,7 @@ def _calculate_score(actual: int, predicted: int) -> int:
 def create_room(req: https_fn.Request) -> https_fn.Response:
     data = req.get_json(silent=True) or {}
     host_name = (data.get("hostName") or "ホスト").strip()
+    category = _normalize_category(data.get("category"))
 
     db = firebase_firestore.client()
     room_id = str(uuid.uuid4())[:8].upper()
@@ -49,6 +71,7 @@ def create_room(req: https_fn.Request) -> https_fn.Response:
         "currentRound": 0,
         "totalRounds": len(QUESTIONS),
         "currentQuestion": None,
+        "category": category,
         "createdAt": datetime.now(timezone.utc),
     })
 
@@ -102,14 +125,17 @@ def start_game(req: https_fn.Request) -> https_fn.Response:
 
     if not room.exists:
         return _err("ルームが見つかりません", 404)
-    if room.to_dict().get("status") != "WAITING":
+    room_data = room.to_dict()
+    if room_data.get("status") != "WAITING":
         return _err("すでに開始済みです", 409)
 
     players = room_ref.collection("players").get()
     if len(players) < 1:
         return _err("参加者が必要です")
 
-    question_queue = random.sample(QUESTIONS, min(TOTAL_ROUNDS_PER_GAME, len(QUESTIONS)))
+    category = _normalize_category(room_data.get("category"))
+    pool = _filter_questions_by_category(category)
+    question_queue = random.sample(pool, min(TOTAL_ROUNDS_PER_GAME, len(pool)))
     first_question = question_queue[0]
     room_ref.update({
         "status": "ANSWERING",
