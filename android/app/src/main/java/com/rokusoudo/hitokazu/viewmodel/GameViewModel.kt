@@ -110,6 +110,17 @@ class GameViewModel : ViewModel() {
         }
     }
 
+    // ── 再戦（ホストのみ・終了画面の「もう一度遊ぶ」） ────────
+    // resetGame() と異なり roomId/playerId/observer は維持する。
+    // observeRoom が FINISHED → WAITING への遷移を全端末に伝え、各画面がそれを検知して
+    // 待合室へ自動遷移する（参加者はルームID再入力・QR再スキャン不要）。
+    fun restartGame() {
+        viewModelScope.launch {
+            repo.restartGame(_uiState.value.roomId)
+                .onFailure { _uiState.update { it.copy(errorMessage = "再戦の開始に失敗しました") } }
+        }
+    }
+
     // ── 回答送信 ──────────────────────────────────────────────
     fun submitAnswer(answer: String) {
         val state = _uiState.value

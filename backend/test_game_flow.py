@@ -245,9 +245,62 @@ snap = room_ref.get()
 check("status=FINISHED", snap.get("status") == "FINISHED")
 check("finalScores 保存", len(snap.get("finalScores")) == len(players))
 
+# ── TEST 9: 再戦（restartGame, Issue #17）────────────────────
+# FirebaseRepository.restartGame() と同じ操作を再現し、
+# 「2ゲーム目でも submitAnswer 相当の処理がすでに回答済みエラーにならない」
+# 「スコアが0から始まる」「カテゴリが引き継がれる」ことを検証する。
+print("\n[TEST 9] 再戦（同一ルームで2ゲーム目）")
+
+room_ref.update({"category": "PARTY"})  # 1ゲーム目のカテゴリを明示しておく
+
+room_before_restart = room_ref.get()
+prev_game_count = (room_before_restart.to_dict() or {}).get("gameCount") or 1
+check("再戦前 gameCount は未設定なら1扱い", prev_game_count == 1, f"実際={prev_game_count}")
+
+room_ref.update({
+    "status": "WAITING",
+    "currentRound": 0,
+    "gameCount": prev_game_count + 1,
+    "currentQuestion": None,
+    "answerCounts": {},
+    "roundScores": [],
+    "finalScores": [],
+    "cumulativeTotals": {},
+})
+snap = room_ref.get()
+check("status=WAITING に戻る", snap.get("status") == "WAITING")
+check("gameCount=2 にインクリメントされる", snap.get("gameCount") == 2)
+check("cumulativeTotals が空（前ゲームのスコアを持ち越さない）", snap.get("cumulativeTotals") == {})
+check("category が引き継がれる（PARTY のまま）", snap.get("category") == "PARTY")
+
+# 2ゲーム目開始（gameCount=2）。round=1 は1ゲーム目と同じ番号だが、
+# roundId に gameCount を含めることで rounds/1_1 とは別ドキュメントになる。
+game_count = snap.get("gameCount")
+round_ref_g2 = room_ref.collection("rounds").document(f"{game_count}_1")
+room_ref.update({
+    "status": "ANSWERING",
+    "currentRound": 1,
+    "currentQuestion": question,
+    "startedAt": datetime.now(timezone.utc),
+})
+
+for pid, answer in answers_input:
+    round_ref_g2.collection("answers").document(pid).set({
+        "answer": answer,
+        "answeredAt": datetime.now(timezone.utc),
+    })
+
+g2_answers_snap = round_ref_g2.collection("answers").get()
+check("2ゲーム目 round=1 に全員分の回答が書き込める（衝突なし）",
+      len(g2_answers_snap) == len(players), f"{len(g2_answers_snap)}/{len(players)}人")
+
+g1_answers_snap = room_ref.collection("rounds").document("1").collection("answers").get()
+check("1ゲーム目 rounds/1/answers は削除されず残っている（roundIdが別なので独立）",
+      len(g1_answers_snap) == len(players), f"{len(g1_answers_snap)}人")
+
 # ── クリーンアップ ─────────────────────────────────────────────
 print("\n[CLEANUP] テストデータ削除...")
-for col in ["1", "2"]:
+for col in ["1", "2", "2_1"]:
     ans_docs = room_ref.collection("rounds").document(col).collection("answers").get()
     for d in ans_docs:
         d.reference.delete()

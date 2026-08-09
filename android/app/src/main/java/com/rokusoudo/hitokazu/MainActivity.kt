@@ -8,6 +8,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -113,18 +115,28 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(Routes.FINISHED) {
+                            val finishedUiState by vm.uiState.collectAsState()
                             FinishedScreen(
                                 viewModel = vm,
                                 onRestart = {
+                                    // restartGame() は roomId/observer を維持したまま status を
+                                    // WAITING に戻す。実際の画面遷移は onWaitingRoom（下記）で行う。
+                                    vm.restartGame()
+                                },
+                                onHome = {
+                                    // 「トップに戻る」は従来どおりルームから離脱してホーム画面へ戻す。
+                                    // onRestart（再戦）とは明確に別の挙動（Issue #17）。
                                     vm.resetGame()
                                     navController.navigate(Routes.HOME) {
                                         popUpTo(Routes.HOME) { inclusive = true }
                                     }
                                 },
-                                onHome = {
-                                    vm.resetGame()
-                                    navController.navigate(Routes.HOME) {
-                                        popUpTo(Routes.HOME) { inclusive = true }
+                                onWaitingRoom = {
+                                    // ホストは QR表示/開始画面へ、参加者は待合室へ。
+                                    // どちらも既存のANSWERING検知でゲーム開始に追従する。
+                                    val destination = if (finishedUiState.isHost) Routes.QR_DISPLAY else Routes.WAITING_ROOM
+                                    navController.navigate(destination) {
+                                        popUpTo(Routes.HOME)
                                     }
                                 },
                             )

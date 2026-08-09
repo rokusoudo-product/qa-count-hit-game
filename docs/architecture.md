@@ -79,9 +79,12 @@ flowchart TB
 | `cumulativeTotals` | map | ラウンド確定時 / 終了時 | プレイヤーごとの累計得点 |
 | `nextRound` | number | ラウンド確定時 | 次に進むラウンド番号 |
 | `phaseStartedAt` | timestamp | フェーズ遷移時 | **現フェーズの開始サーバー時刻。タイムアウト判定の基準**（Issue #14） |
+| `gameCount` | number | createRoom / restartGame | **再戦のたびにインクリメントする世代番号（既定1）。`rounds/{gameCount}_{round}` のドキュメントIDに使い、再戦後の2ゲーム目が前ゲームの回答と衝突しないようにする**（Issue #17） |
+| `lastPlayedQuestionId` | string | restartGame（設定）/ startGame（削除） | 前ゲーム最終問題のID。再戦直後の1問目に同じ質問が連続しないよう startGame() が参照する一時フィールド |
 | `createdAt` | timestamp | createRoom | ルーム作成時刻 |
 | `startedAt` | timestamp | startGame | ゲーム開始時刻 |
 | `finishedAt` | timestamp | ゲーム終了時 | ゲーム終了時刻 |
+| `restartedAt` | timestamp | restartGame | 再戦を開始した時刻 |
 
 `PlayerScore` の構造: `{ playerId, nickname, targetOption, predictedCount, actualCount, roundScore, totalScore }`
 
@@ -93,7 +96,12 @@ flowchart TB
 | `isHost` | boolean | ホストかどうか |
 | `joinedAt` | timestamp | 入室時刻 |
 
-### `rooms/{roomId}/rounds/{round}/answers/{uid}`
+### `rooms/{roomId}/rounds/{gameCount}_{round}/answers/{uid}`
+
+> ドキュメントID（`{round}` のみだった旧仕様から `{gameCount}_{round}` に変更。Issue #17）。
+> `restartGame()` は `gameCount` をインクリメントするだけで前ゲームの `rounds` ドキュメントは削除しない
+> （履歴として残る）。そのため2ゲーム目の `round=1` が前ゲームの `round=1` と衝突せず、
+> `submitAnswer()` の「すでに回答済みです」判定が誤爆しない。
 
 | フィールド | 型 | 説明 |
 |---|---|---|
@@ -140,11 +148,18 @@ PREDICTING（予測フェーズ：既定 predictSeconds = 20秒）
 RESULT（結果表示：10秒）
   ↓ 次のラウンドへ or ゲーム終了
 FINISHED（最終結果）
+  ↓ ホストが「もう一度遊ぶ」（restartGame）
+WAITING（同一ルームで再戦）
 ```
 
 - 状態変更は Firestore ドキュメントの更新で行い、各クライアントは `addSnapshotListener` で自動検知して UI を更新する
 - **タイムアウトはホスト端末が主導して確定させる**（Issue #14）。基準時刻は端末のローカル時計ではなく `phaseStartedAt`（サーバー時刻）から算出するため、途中参加・画面復帰した端末でもズレない
 - 未提出者は当該ラウンドのスコア集計から除外される
+- **`FINISHED → WAITING` はホストの「もう一度遊ぶ」でのみ発生する**（Issue #17）。`restartGame()` は
+  `category` を引き継いだまま `status/currentRound/スコア類` をリセットし、`gameCount` をインクリメントする。
+  参加者側は `observeRoom` でこの遷移を検知し、ルームID再入力・QR再スキャンなしで自動的に待合室へ戻る。
+  再戦時も新規参加は引き続き受け付ける（途中参加が自然なパーティー用途のため、意図的な仕様）。
+  「トップに戻る」（`resetGame`）はルームから離脱してホーム画面に戻るだけで、`FINISHED → WAITING` は起こさない
 
 > ⚠️ ホスト自身が離脱するとタイムアウト確定を実行する主体がいなくなる。この扱いは Issue #15 で対応する（Firestore ハートビートで検知し、ルームを終了する方針で確定済み）。
 
@@ -188,7 +203,7 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 |---|---|---|---|---|
 | `rooms/{roomId}` | 認証済み | `hostUid == 自分` | 参加者 | ホスト |
 | `players/{uid}` | 参加者 | 自分のみ | 自分のみ | 自分 or ホスト |
-| `rounds/{n}/answers/{uid}` | 参加者 | 参加者かつ自分 | 参加者※ | ホスト |
+| `rounds/{roundId}/answers/{uid}`（`roundId` = `{gameCount}_{round}`） | 参加者 | 参加者かつ自分 | 参加者※ | ホスト |
 
 ルーム本体の read だけ認証済みに開放しているのは、`joinRoom()` が入室前に存在確認・満員判定でルームを読む必要があるため。
 
