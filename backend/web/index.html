@@ -172,6 +172,13 @@
     </div>
     <button class="btn-primary" onclick="resetGame()" style="margin-top:16px">トップに戻る</button>
   </div>
+
+  <!-- ホスト離脱によるルーム終了画面 -->
+  <div id="screen-host-left" class="screen">
+    <h2>ルームを終了しました</h2>
+    <p class="info" style="text-align:center">ホストが離脱したためルームを終了しました</p>
+    <button class="btn-primary" onclick="resetGame()" style="margin-top:16px">トップに戻る</button>
+  </div>
 </div>
 
 <script type="module">
@@ -197,6 +204,13 @@
   // 回答・予測フェーズのタイムアウト猶予秒数（通信遅延・端末クロックのズレを吸収するバッファ）
   const TIMEOUT_GRACE_SECONDS = 3;
 
+  // ホスト端末がルームドキュメントにハートビートを書き込む間隔（秒）。
+  // 参加者端末はこの3倍の時間ハートビートが更新されなければホスト離脱とみなす。
+  // 例: 15秒間隔・5ラウンド(1ラウンド50秒程度)＝約5分のゲームで書き込み回数は約20回。
+  // Firestore無料枠（書き込み2万回/日）に対して十分小さい（Issue #15）。
+  const HOST_HEARTBEAT_INTERVAL_SECONDS = 15;
+  const HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECONDS * 3;
+
   let state = {
     uid: null,
     roomId: null,
@@ -211,9 +225,13 @@
     autoAdvanceTimer: null,
     answeringTimeoutTimer: null,
     predictingTimeoutTimer: null,
+    hostHeartbeatInterval: null,
+    hostLeftCheckTimer: null,
     // 直近でタイムアウト監視をスケジュールした（フェーズ:ラウンド:フェーズ開始時刻）の組。
     // 同じ組に対して重複してタイマーを仕込まないようにするためのガード。
     lastScheduledTimeoutKey: null,
+    // 直近でホスト離脱監視をスケジュールしたhostHeartbeatAtの値（ミリ秒）。
+    lastScheduledHeartbeatAt: null,
   };
 
   // 匿名認証
@@ -267,6 +285,9 @@
       hostName, hostUid: state.uid,
       status: 'WAITING', currentRound: 0, totalRounds: 5,
       currentQuestion: null, category, createdAt: serverTimestamp(),
+      // 参加者が join した直後からホスト離脱判定の基準を持てるよう、作成時点でも書いておく
+      // （初回の定期ハートビートが届くまでの間、判定対象がnullで判定をスキップされる隙間を埋める）。
+      hostHeartbeatAt: serverTimestamp(),
     });
     await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
       nickname: hostName, isHost: true, joinedAt: serverTimestamp(),
@@ -303,6 +324,66 @@
     document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
     showScreen('waiting');
     startObserving();
+    // ホスト端末は観測開始と同時に定期ハートビートの送信を始める（フェーズを問わず、
+    // 待合室段階からのホスト離脱も検知できるようにするため）。
+    if (state.isHost) startHostHeartbeat();
+  }
+
+  // ── ホストのハートビート定期送信（ホストのみ） ──────────
+  async function sendHostHeartbeat() {
+    try {
+      await updateDoc(doc(db, 'rooms', state.roomId), { hostHeartbeatAt: serverTimestamp() });
+    } catch (err) {
+      console.error('sendHostHeartbeat failed', err);
+    }
+  }
+
+  function startHostHeartbeat() {
+    clearInterval(state.hostHeartbeatInterval);
+    sendHostHeartbeat();
+    state.hostHeartbeatInterval = setInterval(sendHostHeartbeat, HOST_HEARTBEAT_INTERVAL_SECONDS * 1000);
+  }
+
+  // ── ホスト離脱によるルーム終了（参加者のみ呼び出し） ──────
+  // hostHeartbeatAt の更新が閾値時間止まったと判定した参加者端末が呼び出す。
+  // すでにゲームが終了・確定済み（FINISHED/HOST_LEFT）の場合は何もしない
+  // （古いハートビート監視タイマーが後から発火した場合の二重確定を防ぐ）。
+  async function terminateRoomHostLeft() {
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomSnap = await getDoc(roomRef);
+    if (!roomSnap.exists()) return;
+    const status = roomSnap.data().status;
+    if (status === 'FINISHED' || status === 'HOST_LEFT') return;
+    await updateDoc(roomRef, { status: 'HOST_LEFT' });
+  }
+
+  // ── ホスト離脱監視をスケジュール（参加者のみ） ────────────
+  // hostHeartbeatAtが更新されるたびに監視タイマーを仕込み直す（ウォッチドッグ方式）。
+  // 次の更新が来る前にタイマーが尽きたら、ホストが離脱したとみなしルームを終了させる。
+  function scheduleHostLeftCheck(data) {
+    if (state.isHost) return;
+
+    if (data.status === 'FINISHED' || data.status === 'HOST_LEFT') {
+      clearTimeout(state.hostLeftCheckTimer);
+      state.hostLeftCheckTimer = null;
+      state.lastScheduledHeartbeatAt = null;
+      return;
+    }
+
+    const heartbeatAtMs = (data.hostHeartbeatAt && typeof data.hostHeartbeatAt.toMillis === 'function')
+      ? data.hostHeartbeatAt.toMillis()
+      : null;
+    // 初回のハートビートが届くまでは判定しない（createRoom時に書き込まれるため、
+    // 通常はルーム参加直後から値が存在する）。
+    if (heartbeatAtMs == null) return;
+    if (state.lastScheduledHeartbeatAt === heartbeatAtMs) return;
+    state.lastScheduledHeartbeatAt = heartbeatAtMs;
+
+    const deadline = heartbeatAtMs + HOST_HEARTBEAT_TIMEOUT_SECONDS * 1000;
+    clearTimeout(state.hostLeftCheckTimer);
+    state.hostLeftCheckTimer = setTimeout(() => {
+      terminateRoomHostLeft().catch(err => console.error('terminateRoomHostLeft failed', err));
+    }, Math.max(0, deadline - Date.now()));
   }
 
   function startObserving() {
@@ -329,11 +410,18 @@
       const data = snap.data();
       const phase = data.status;
 
-      // ホストのタイムアウト監視は、画面再描画の間引き（下の早期return）とは独立に
-      // 毎スナップショットで評価する。serverTimestamp()確定時に発火するスナップショットは
-      // phase/currentRoundが変化しないため、間引きされると基準時刻を取得し損ねるため。
+      // ホストのタイムアウト監視・ホスト離脱監視は、画面再描画の間引き（下の早期return）とは
+      // 独立に毎スナップショットで評価する。serverTimestamp()確定時に発火するスナップショットは
+      // phase/currentRoundが変化しないため、間引きされると基準時刻を取得し損ねる
+      // （ハートビート書き込みはまさにこのケース＝phase・roundを一切変えない）。
       if (state.isHost) {
         scheduleHostTimeouts(data);
+        if (phase === 'FINISHED' || phase === 'HOST_LEFT') {
+          clearInterval(state.hostHeartbeatInterval);
+          state.hostHeartbeatInterval = null;
+        }
+      } else {
+        scheduleHostLeftCheck(data);
       }
 
       if (phase === state.currentPhase && data.currentRound === state.currentRound) return;
@@ -354,6 +442,8 @@
         }
       } else if (phase === 'FINISHED') {
         renderFinished(data);
+      } else if (phase === 'HOST_LEFT') {
+        renderHostLeft();
       }
     });
   }
@@ -718,15 +808,22 @@
     showScreen('finished');
   }
 
+  function renderHostLeft() {
+    showScreen('host-left');
+  }
+
   function resetGame() {
     if (state.roomUnsub) state.roomUnsub();
     if (state.playersUnsub) state.playersUnsub();
     clearTimeout(state.autoAdvanceTimer);
     clearTimeout(state.answeringTimeoutTimer);
     clearTimeout(state.predictingTimeoutTimer);
+    clearInterval(state.hostHeartbeatInterval);
+    clearTimeout(state.hostLeftCheckTimer);
     state = { ...state, roomId: null, isHost: false, nickname: '', selectedAnswer: null,
       predictionSent: false, currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null,
-      answeringTimeoutTimer: null, predictingTimeoutTimer: null, lastScheduledTimeoutKey: null };
+      answeringTimeoutTimer: null, predictingTimeoutTimer: null, lastScheduledTimeoutKey: null,
+      hostHeartbeatInterval: null, hostLeftCheckTimer: null, lastScheduledHeartbeatAt: null };
     showScreen('home');
   }
 </script>

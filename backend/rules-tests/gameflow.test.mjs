@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert';
-import { assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
+import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 
 const HOST = 'flow-host';
@@ -146,5 +146,65 @@ describe('実ゲームフロー（クライアント権限・ルール適用下�
     );
     const room = await getDoc(doc(db, `rooms/${ROOM}`));
     assert.strictEqual(room.data().status, 'FINISHED');
+  });
+});
+
+// Issue #15: ホスト離脱（ハートビート停止）によるルーム終了。
+// FLOWROOM は上のテストで既に FINISHED まで進めているため、
+// 意味のない状態遷移にならないよう別ルームを使う。
+describe('ホスト離脱によるルーム終了（Issue #15）', () => {
+  const HB_ROOM = 'HBFLOWROOM';
+
+  it('1) ホストがルーム作成時と定期送信でハートビートを書き込める', async () => {
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${HB_ROOM}`), {
+        hostName: 'ホスト太郎',
+        hostUid: HOST,
+        status: 'WAITING',
+        currentRound: 0,
+        totalRounds: 5,
+        category: 'ALL',
+        hostHeartbeatAt: new Date(),
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${HB_ROOM}/players/${HOST}`), { nickname: 'ホスト太郎', isHost: true }),
+    );
+
+    const p2Db = testEnv.authenticatedContext(P2).firestore();
+    await assertSucceeds(
+      setDoc(doc(p2Db, `rooms/${HB_ROOM}/players/${P2}`), { nickname: P2, isHost: false }),
+    );
+
+    // GameViewModel.sendHostHeartbeat / index.html sendHostHeartbeat と同じ操作（定期更新）
+    await assertSucceeds(
+      updateDoc(doc(hostDb, `rooms/${HB_ROOM}`), { hostHeartbeatAt: new Date() }),
+    );
+  });
+
+  it('2) ホスト以外の参加者が、ハートビート停止を検知してルームをHOST_LEFTにできる', async () => {
+    // FirebaseRepository.terminateRoomHostLeft / index.html terminateRoomHostLeft と同じ操作。
+    // 実行者はホストではなく、離脱を検知した参加者側。
+    const p2Db = testEnv.authenticatedContext(P2).firestore();
+    const before = await assertSucceeds(getDoc(doc(p2Db, `rooms/${HB_ROOM}`)));
+    assert.strictEqual(before.data().status, 'WAITING');
+
+    await assertSucceeds(
+      updateDoc(doc(p2Db, `rooms/${HB_ROOM}`), { status: 'HOST_LEFT' }),
+    );
+
+    const after = await getDoc(doc(p2Db, `rooms/${HB_ROOM}`));
+    assert.strictEqual(after.data().status, 'HOST_LEFT');
+  });
+
+  it('3) 部外者はハートビートもHOST_LEFT遷移も書き込めない', async () => {
+    const outsiderDb = testEnv.authenticatedContext('hb-outsider').firestore();
+    await assertFails(
+      updateDoc(doc(outsiderDb, `rooms/${HB_ROOM}`), { hostHeartbeatAt: new Date() }),
+    );
+    await assertFails(
+      updateDoc(doc(outsiderDb, `rooms/${HB_ROOM}`), { status: 'HOST_LEFT' }),
+    );
   });
 });
