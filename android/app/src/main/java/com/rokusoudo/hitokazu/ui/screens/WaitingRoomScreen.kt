@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokusoudo.hitokazu.data.model.GamePhase
+import com.rokusoudo.hitokazu.ui.components.ConnectionBanner
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
 @Composable
@@ -27,83 +28,90 @@ fun WaitingRoomScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(text = "待合室", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-
-        Text(
-            text = "ルームID: ${uiState.roomId}",
-            fontSize = 20.sp,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 8.dp),
+    Column(modifier = Modifier.fillMaxSize()) {
+        ConnectionBanner(
+            isDisconnected = uiState.isDisconnected,
+            onReconnect = { viewModel.reconnect() },
         )
 
-        // 接続状態（Firebase自動管理）
-        Text(
-            text = "Firebase接続中",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
-        )
-
-        Text(
-            text = "参加者 (${uiState.players.size}人)",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium,
-        )
-
-        LazyColumn(
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            items(uiState.players) { player ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(text = "待合室", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+
+            Text(
+                text = "ルームID: ${uiState.roomId}",
+                fontSize = 20.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+
+            // 接続状態（Firebase自動管理）
+            Text(
+                text = "Firebase接続中",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
+            )
+
+            Text(
+                text = "参加者 (${uiState.players.size}人)",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+            )
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(uiState.players) { player ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(
-                            text = player.nickname,
-                            fontSize = 16.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (player.isHost) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = MaterialTheme.shapes.small,
-                            ) {
-                                Text(
-                                    text = "ホスト",
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                )
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = player.nickname,
+                                fontSize = 16.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (player.isHost) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = MaterialTheme.shapes.small,
+                                ) {
+                                    Text(
+                                        text = "ホスト",
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-        if (!uiState.isHost) {
-            Text(
-                text = "ホストがゲームを開始するまでお待ちください",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                modifier = Modifier.padding(bottom = 24.dp),
-            )
+            if (!uiState.isHost) {
+                Text(
+                    text = "ホストがゲームを開始するまでお待ちください",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(bottom = 24.dp),
+                )
+            }
         }
     }
 }

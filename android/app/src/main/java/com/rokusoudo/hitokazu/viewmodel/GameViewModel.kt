@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rokusoudo.hitokazu.data.firebase.FirebaseRepository
+import com.rokusoudo.hitokazu.data.firebase.PlayersEvent
+import com.rokusoudo.hitokazu.data.firebase.RoomEvent
 import com.rokusoudo.hitokazu.data.model.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -28,6 +30,8 @@ data class GameUiState(
     val isLoading: Boolean = false,
     val pendingJoinRoomId: String? = null,
     val selectedCategory: QuestionCategory = QuestionCategory.ALL,
+    // Firestoreとの接続が切れている（と判定された）状態。ConnectionBannerの表示制御に使う（Issue #18）。
+    val isDisconnected: Boolean = false,
 )
 
 // 回答・予測フェーズのタイムアウト猶予秒数（通信遅延・端末クロックのズレを吸収するバッファ）
@@ -39,6 +43,10 @@ private const val TIMEOUT_GRACE_SECONDS = 3
 // Firestore無料枠（書き込み2万回/日）に対して十分小さい。
 private const val HOST_HEARTBEAT_INTERVAL_SECONDS = 15L
 private const val HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECONDS * 3
+
+// snapshotがキャッシュ由来のまま連続した場合に「切断」とみなすまでの猶予（ミリ秒）。
+// 代表確認済み: 5秒固定。調整する場合はこの定数のみを変更すればよい（Issue #18）。
+private const val DISCONNECT_THRESHOLD_MS = 5_000L
 
 class GameViewModel : ViewModel() {
 
@@ -61,6 +69,39 @@ class GameViewModel : ViewModel() {
     // 直近でホスト離脱監視をスケジュールしたhostHeartbeatAtMillisの値。
     // 同じ値に対して重複してタイマーを仕込まないようにするためのガード。
     private var lastScheduledHeartbeatAt: Long? = null
+
+    // ── 接続状態の監視（Issue #18） ───────────────────────────
+    // room / players それぞれのリスナーについて、キャッシュ由来のデータが
+    // DISCONNECT_THRESHOLD_MS 続いたら「切断」とみなすためのタイマー。
+    private var roomCacheTimeoutJob: Job? = null
+    private var playersCacheTimeoutJob: Job? = null
+
+    // 切断と判定されているソース（"room" / "players"）の集合。
+    // 空であれば isDisconnected = false。どちらか一方でも切断中ならバナーを表示する。
+    private val disconnectedSources = mutableSetOf<String>()
+
+    private fun markSourceDisconnected(source: String) {
+        if (disconnectedSources.add(source)) {
+            _uiState.update { it.copy(isDisconnected = true) }
+        }
+    }
+
+    private fun markSourceConnected(source: String) {
+        if (disconnectedSources.remove(source)) {
+            _uiState.update { it.copy(isDisconnected = disconnectedSources.isNotEmpty()) }
+        }
+    }
+
+    // isFromCacheな更新を受けるたびに呼ぶ。「キャッシュ由来が5秒続いたら切断」という
+    // 仕様なので、すでに計測中のタイマーがあればそれを流用し、キャッシュ由来の更新が
+    // 連続するたびに5秒を数え直す（＝ずっと切断判定に到達しない）ことを避ける。
+    private fun scheduleCacheTimeout(source: String, existingJob: Job?): Job {
+        if (existingJob?.isActive == true) return existingJob
+        return viewModelScope.launch {
+            delay(DISCONNECT_THRESHOLD_MS)
+            markSourceDisconnected(source)
+        }
+    }
 
     // ── ルーム作成（ホスト） ──────────────────────────────────
     fun createRoom(hostName: String, category: QuestionCategory = QuestionCategory.ALL) {
@@ -145,6 +186,13 @@ class GameViewModel : ViewModel() {
 
     // ── Firestoreリアルタイム監視 ─────────────────────────────
     private fun startObserving(roomId: String) {
+        // リスナーの張り直し（reconnect含む）のたびに、古い接続監視タイマーも
+        // 引き継がず作り直す。引き継ぐと張り直し直後に古いタイマーが誤発火しうる。
+        roomCacheTimeoutJob?.cancel()
+        roomCacheTimeoutJob = null
+        playersCacheTimeoutJob?.cancel()
+        playersCacheTimeoutJob = null
+
         // ホスト端末は観測開始と同時に定期ハートビートの送信を始める（フェーズを問わず、
         // 待合室段階からのホスト離脱も検知できるようにするため）。
         if (_uiState.value.isHost) {
@@ -153,73 +201,109 @@ class GameViewModel : ViewModel() {
 
         roomObserverJob?.cancel()
         roomObserverJob = viewModelScope.launch {
-            repo.observeRoom(roomId).collect { snapshot ->
-                _uiState.update { state ->
-                    state.copy(
-                        phase = snapshot.status,
-                        currentRound = snapshot.currentRound,
-                        totalRounds = snapshot.totalRounds,
-                        currentQuestion = snapshot.currentQuestion,
-                        answerCounts = snapshot.answerCounts,
-                        scores = when (snapshot.status) {
-                            GamePhase.FINISHED -> snapshot.finalScores
-                            else -> snapshot.roundScores
-                        },
-                        selectedAnswer = if (snapshot.status == GamePhase.ANSWERING &&
-                            snapshot.currentRound != state.currentRound
-                        ) "" else state.selectedAnswer,
-                    )
-                }
+            repo.observeRoom(roomId).collect { event ->
+                when (event) {
+                    is RoomEvent.Error -> {
+                        // Logcatへの出力はFirebaseRepository側で実施済み。
+                        // ここではUiState経由でバナー表示に反映する。
+                        roomCacheTimeoutJob?.cancel()
+                        roomCacheTimeoutJob = null
+                        markSourceDisconnected("room")
+                    }
+                    is RoomEvent.Data -> {
+                        val snapshot = event.snapshot
+                        if (event.isFromCache) {
+                            roomCacheTimeoutJob = scheduleCacheTimeout("room", roomCacheTimeoutJob)
+                        } else {
+                            roomCacheTimeoutJob?.cancel()
+                            roomCacheTimeoutJob = null
+                            markSourceConnected("room")
+                        }
 
-                // ホストがRESULTを検知したら10秒後に次ラウンドへ自動進行
-                if (snapshot.status == GamePhase.RESULT && _uiState.value.isHost) {
-                    autoAdvanceJob?.cancel()
-                    autoAdvanceJob = viewModelScope.launch {
-                        delay(10_000)
-                        repo.advanceToNextRound(roomId)
-                            .onFailure { Log.e("GameViewModel", "advanceToNextRound failed", it) }
+                        _uiState.update { state ->
+                            state.copy(
+                                phase = snapshot.status,
+                                currentRound = snapshot.currentRound,
+                                totalRounds = snapshot.totalRounds,
+                                currentQuestion = snapshot.currentQuestion,
+                                answerCounts = snapshot.answerCounts,
+                                scores = when (snapshot.status) {
+                                    GamePhase.FINISHED -> snapshot.finalScores
+                                    else -> snapshot.roundScores
+                                },
+                                selectedAnswer = if (snapshot.status == GamePhase.ANSWERING &&
+                                    snapshot.currentRound != state.currentRound
+                                ) "" else state.selectedAnswer,
+                            )
+                        }
+
+                        // ホストがRESULTを検知したら10秒後に次ラウンドへ自動進行
+                        if (snapshot.status == GamePhase.RESULT && _uiState.value.isHost) {
+                            autoAdvanceJob?.cancel()
+                            autoAdvanceJob = viewModelScope.launch {
+                                delay(10_000)
+                                repo.advanceToNextRound(roomId)
+                                    .onFailure { Log.e("GameViewModel", "advanceToNextRound failed", it) }
+                            }
+                        }
+
+                        // ホスト端末が回答・予測フェーズのタイムアウトを監視する。
+                        // 1人でも未提出のままタイマーが尽きると、提出済み分だけでフェーズを強制確定する。
+                        when (snapshot.status) {
+                            GamePhase.ANSWERING -> {
+                                predictingTimeoutJob?.cancel()
+                                predictingTimeoutJob = null
+                                scheduleAnsweringTimeout(roomId, snapshot)
+                            }
+                            GamePhase.PREDICTING -> {
+                                answeringTimeoutJob?.cancel()
+                                answeringTimeoutJob = null
+                                schedulePredictingTimeout(roomId, snapshot)
+                            }
+                            else -> {
+                                answeringTimeoutJob?.cancel()
+                                predictingTimeoutJob?.cancel()
+                                answeringTimeoutJob = null
+                                predictingTimeoutJob = null
+                                lastScheduledTimeoutKey = null
+                            }
+                        }
+
+                        // ゲームが終了・確定した場合、ホストのハートビート送信も止める（無駄な書き込みを避ける）。
+                        if (_uiState.value.isHost &&
+                            (snapshot.status == GamePhase.FINISHED || snapshot.status == GamePhase.HOST_LEFT)
+                        ) {
+                            hostHeartbeatJob?.cancel()
+                            hostHeartbeatJob = null
+                        }
+
+                        // 参加者端末はホストのハートビート停止を監視し、離脱を検知したらルームを終了させる。
+                        scheduleHostLeftCheck(roomId, snapshot)
                     }
                 }
-
-                // ホスト端末が回答・予測フェーズのタイムアウトを監視する。
-                // 1人でも未提出のままタイマーが尽きると、提出済み分だけでフェーズを強制確定する。
-                when (snapshot.status) {
-                    GamePhase.ANSWERING -> {
-                        predictingTimeoutJob?.cancel()
-                        predictingTimeoutJob = null
-                        scheduleAnsweringTimeout(roomId, snapshot)
-                    }
-                    GamePhase.PREDICTING -> {
-                        answeringTimeoutJob?.cancel()
-                        answeringTimeoutJob = null
-                        schedulePredictingTimeout(roomId, snapshot)
-                    }
-                    else -> {
-                        answeringTimeoutJob?.cancel()
-                        predictingTimeoutJob?.cancel()
-                        answeringTimeoutJob = null
-                        predictingTimeoutJob = null
-                        lastScheduledTimeoutKey = null
-                    }
-                }
-
-                // ゲームが終了・確定した場合、ホストのハートビート送信も止める（無駄な書き込みを避ける）。
-                if (_uiState.value.isHost &&
-                    (snapshot.status == GamePhase.FINISHED || snapshot.status == GamePhase.HOST_LEFT)
-                ) {
-                    hostHeartbeatJob?.cancel()
-                    hostHeartbeatJob = null
-                }
-
-                // 参加者端末はホストのハートビート停止を監視し、離脱を検知したらルームを終了させる。
-                scheduleHostLeftCheck(roomId, snapshot)
             }
         }
 
         playerObserverJob?.cancel()
         playerObserverJob = viewModelScope.launch {
-            repo.observePlayers(roomId).collect { players ->
-                _uiState.update { it.copy(players = players) }
+            repo.observePlayers(roomId).collect { event ->
+                when (event) {
+                    is PlayersEvent.Error -> {
+                        playersCacheTimeoutJob?.cancel()
+                        playersCacheTimeoutJob = null
+                        markSourceDisconnected("players")
+                    }
+                    is PlayersEvent.Data -> {
+                        if (event.isFromCache) {
+                            playersCacheTimeoutJob = scheduleCacheTimeout("players", playersCacheTimeoutJob)
+                        } else {
+                            playersCacheTimeoutJob?.cancel()
+                            playersCacheTimeoutJob = null
+                            markSourceConnected("players")
+                        }
+                        _uiState.update { it.copy(players = event.players) }
+                    }
+                }
             }
         }
     }
@@ -315,6 +399,11 @@ class GameViewModel : ViewModel() {
         hostLeftCheckJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
+        roomCacheTimeoutJob?.cancel()
+        playersCacheTimeoutJob?.cancel()
+        roomCacheTimeoutJob = null
+        playersCacheTimeoutJob = null
+        disconnectedSources.clear()
         lastScheduledTimeoutKey = null
         lastScheduledHeartbeatAt = null
         _uiState.value = GameUiState()
@@ -322,7 +411,19 @@ class GameViewModel : ViewModel() {
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
-    fun reconnect() {}
+    // ── 再接続（ConnectionBannerの「再接続」ボタンから呼び出す） ──
+    // Firestoreのネットワークを明示的に有効化しつつ、room/playersリスナーを
+    // 張り直す。切断中に進んだルーム状態は、張り直し後の最新snapshotで反映される。
+    fun reconnect() {
+        val roomId = _uiState.value.roomId
+        if (roomId.isEmpty()) return
+
+        viewModelScope.launch {
+            repo.enableNetwork()
+                .onFailure { Log.e("GameViewModel", "enableNetwork failed", it) }
+        }
+        startObserving(roomId)
+    }
 
     // ── ディープリンクから受け取ったルームIDをセット ──────────
     fun setPendingJoinRoomId(roomId: String) {
@@ -342,5 +443,7 @@ class GameViewModel : ViewModel() {
         hostLeftCheckJob?.cancel()
         roomObserverJob?.cancel()
         playerObserverJob?.cancel()
+        roomCacheTimeoutJob?.cancel()
+        playersCacheTimeoutJob?.cancel()
     }
 }

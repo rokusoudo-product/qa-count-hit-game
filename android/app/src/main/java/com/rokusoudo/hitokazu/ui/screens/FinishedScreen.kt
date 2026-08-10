@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rokusoudo.hitokazu.data.model.PlayerScore
+import com.rokusoudo.hitokazu.ui.components.ConnectionBanner
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
 @Composable
@@ -25,96 +26,103 @@ fun FinishedScreen(
     val uiState by viewModel.uiState.collectAsState()
     val winner = uiState.scores.firstOrNull()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "ゲーム終了！",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
+    Column(modifier = Modifier.fillMaxSize()) {
+        ConnectionBanner(
+            isDisconnected = uiState.isDisconnected,
+            onReconnect = { viewModel.reconnect() },
         )
 
-        Text(
-            text = "お疲れさまでした",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(modifier = Modifier.height(16.dp))
 
-        // 優勝者
-        winner?.let {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            Text(
+                text = "ゲーム終了！",
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Text(
+                text = "お疲れさまでした",
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 4.dp, bottom = 24.dp),
+            )
+
+            // 優勝者
+            winner?.let {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ),
                 ) {
-                    Text(text = "🏆 優勝", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = it.nickname.ifEmpty { it.playerId } + if (it.playerId == uiState.playerId) "（あなた！）" else "",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        text = "${it.totalScore}点",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(text = "🏆 優勝", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = it.nickname.ifEmpty { it.playerId } + if (it.playerId == uiState.playerId) "（あなた！）" else "",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "${it.totalScore}点",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            text = "最終ランキング",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-        )
+            Text(
+                text = "最終ランキング",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            itemsIndexed(uiState.scores) { index, score ->
-                FinalRankingRow(rank = index + 1, score = score, myPlayerId = uiState.playerId)
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(uiState.scores) { index, score ->
+                    FinalRankingRow(rank = index + 1, score = score, myPlayerId = uiState.playerId)
+                }
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-        if (uiState.isHost) {
-            Button(
-                onClick = onRestart,
+            if (uiState.isHost) {
+                Button(
+                    onClick = onRestart,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Text("もう一度遊ぶ", fontSize = 16.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            OutlinedButton(
+                onClick = onHome,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text("もう一度遊ぶ", fontSize = 16.sp)
+                Text("トップに戻る", fontSize = 16.sp)
             }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
 
-        OutlinedButton(
-            onClick = onHome,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) {
-            Text("トップに戻る", fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(16.dp))
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
