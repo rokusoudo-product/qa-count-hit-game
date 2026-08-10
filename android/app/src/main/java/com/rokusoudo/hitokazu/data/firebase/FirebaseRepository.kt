@@ -1,7 +1,9 @@
 package com.rokusoudo.hitokazu.data.firebase
 
+import android.util.Log
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
@@ -11,6 +13,21 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+
+private const val TAG = "FirebaseRepository"
+
+// ── リアルタイム監視の通知イベント ──────────────────────
+// addSnapshotListenerのerrorをUI側へ伝えるため、データ更新とエラーを
+// 区別できるsealed classとして公開する（Issue #18: errorをもみ消さない）。
+sealed class RoomEvent {
+    data class Data(val snapshot: RoomSnapshot, val isFromCache: Boolean) : RoomEvent()
+    data class Error(val throwable: Throwable) : RoomEvent()
+}
+
+sealed class PlayersEvent {
+    data class Data(val players: List<Player>, val isFromCache: Boolean) : PlayersEvent()
+    data class Error(val throwable: Throwable) : PlayersEvent()
+}
 
 class FirebaseRepository {
 
@@ -332,22 +349,38 @@ class FirebaseRepository {
     }
 
     // ── ルーム状態をリアルタイム監視（Firestoreリスナー） ──
-    fun observeRoom(roomId: String): Flow<RoomSnapshot> = callbackFlow {
+    // snapshot.metadata.isFromCache をUI側（GameViewModel）に伝えることで、
+    // サーバー由来の更新が一定時間来ない状態＝切断とみなす判定を可能にする。
+    // MetadataChanges.INCLUDE を付けないと、データ自体に変化がないメタデータのみの
+    // 遷移（オンライン↔オフライン）ではコールバックが一切呼ばれず、切断検知ができない。
+    // error はもみ消さず、Logcatへの出力とRoomEvent.Errorとしての通知の両方を行う（Issue #18）。
+    fun observeRoom(roomId: String): Flow<RoomEvent> = callbackFlow {
         val listener = db.collection("rooms").document(roomId)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null || snapshot == null) return@addSnapshotListener
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "observeRoom snapshot error (roomId=$roomId)", error)
+                    trySend(RoomEvent.Error(error))
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
                 val data = snapshot.data ?: return@addSnapshotListener
-                trySend(RoomSnapshot.fromMap(data))
+                trySend(RoomEvent.Data(RoomSnapshot.fromMap(data), snapshot.metadata.isFromCache))
             }
         awaitClose { listener.remove() }
     }
 
     // ── プレイヤー一覧をリアルタイム監視 ───────────────────
-    fun observePlayers(roomId: String): Flow<List<Player>> = callbackFlow {
+    // observeRoomと同様、MetadataChanges.INCLUDEでキャッシュ⇔サーバーの遷移を検知する。
+    fun observePlayers(roomId: String): Flow<PlayersEvent> = callbackFlow {
         val listener = db.collection("rooms").document(roomId)
             .collection("players")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null || snapshot == null) return@addSnapshotListener
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "observePlayers snapshot error (roomId=$roomId)", error)
+                    trySend(PlayersEvent.Error(error))
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
                 val players = snapshot.documents.map { doc ->
                     Player(
                         playerId = doc.id,
@@ -355,9 +388,16 @@ class FirebaseRepository {
                         isHost = doc.getBoolean("isHost") ?: false,
                     )
                 }
-                trySend(players)
+                trySend(PlayersEvent.Data(players, snapshot.metadata.isFromCache))
             }
         awaitClose { listener.remove() }
+    }
+
+    // ── ネットワーク再接続（再接続ボタンから呼び出す） ─────
+    // リスナーの張り直し（GameViewModel.reconnect）と併用し、切断状態からの
+    // 復帰を早める。すでに有効化されている場合は何もしない安全な操作。
+    suspend fun enableNetwork(): Result<Unit> = runCatching {
+        db.enableNetwork().await()
     }
 }
 

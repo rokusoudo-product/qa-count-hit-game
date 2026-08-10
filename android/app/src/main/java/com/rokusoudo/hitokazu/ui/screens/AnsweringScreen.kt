@@ -29,7 +29,7 @@ fun AnsweringScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ConnectionBanner(
-            isDisconnected = false,
+            isDisconnected = uiState.isDisconnected,
             onReconnect = { viewModel.reconnect() },
         )
 
