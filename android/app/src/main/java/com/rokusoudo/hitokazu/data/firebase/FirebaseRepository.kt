@@ -60,6 +60,9 @@ class FirebaseRepository {
                 "totalRounds" to TOTAL_ROUNDS_PER_GAME,
                 "currentQuestion" to null,
                 "category" to category.name,
+                // 同一ルームでの再戦（restartGame）ごとにインクリメントする世代番号。
+                // rounds/{gameCount}_{round} のドキュメントIDに使い、前ゲームの回答と衝突させない（Issue #17）。
+                "gameCount" to 1L,
                 "createdAt" to FieldValue.serverTimestamp(),
             )
         ).await()
@@ -108,10 +111,36 @@ class FirebaseRepository {
         val roomSnap = db.collection("rooms").document(roomId).get().await()
         val categoryStr = roomSnap.getString("category")
         val category = QuestionCategory.fromString(categoryStr)
+        // 再戦（restartGame）直後は前ゲーム最終問題のIDが入っている（Issue #17）。
+        val avoidQuestionId = roomSnap.getString("lastPlayedQuestionId")
 
         val filtered = QUESTIONS.filter { q -> q.tags.any { it in category.tags } }
         val pool = if (filtered.isEmpty()) QUESTIONS else filtered
-        val questionQueue = pool.shuffled().take(TOTAL_ROUNDS_PER_GAME)
+        var questionQueue = pool.shuffled().take(TOTAL_ROUNDS_PER_GAME)
+
+        // 再戦時、前ゲーム最後の質問がそのまま1問目にならないよう、可能なら入れ替える。
+        if (avoidQuestionId != null && questionQueue.firstOrNull()?.questionId == avoidQuestionId) {
+            val altIndex = questionQueue.indexOfFirst { it.questionId != avoidQuestionId }
+            questionQueue = if (altIndex > 0) {
+                questionQueue.toMutableList().apply {
+                    val tmp = this[0]
+                    this[0] = this[altIndex]
+                    this[altIndex] = tmp
+                }
+            } else {
+                // キュー内が全て同じ質問（プールが極小）の場合は、プール全体から差し替えを探す
+                val replacement = pool.firstOrNull { candidate ->
+                    candidate.questionId != avoidQuestionId &&
+                        questionQueue.none { it.questionId == candidate.questionId }
+                }
+                if (replacement != null) {
+                    listOf(replacement) + questionQueue.drop(1)
+                } else {
+                    questionQueue // 代替なし。避けられないので諦める
+                }
+            }
+        }
+
         val firstQuestion = questionQueue[0]
         db.collection("rooms").document(roomId).update(
             mapOf(
@@ -122,6 +151,7 @@ class FirebaseRepository {
                 "currentQuestion" to firstQuestion.toMap(),
                 "startedAt" to FieldValue.serverTimestamp(),
                 "phaseStartedAt" to FieldValue.serverTimestamp(),
+                "lastPlayedQuestionId" to FieldValue.delete(),
             )
         ).await()
     }
@@ -135,7 +165,8 @@ class FirebaseRepository {
         if (roomData["status"] != "ANSWERING") error("回答フェーズではありません")
 
         val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: error("ラウンド情報なし")
-        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val gameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val roundRef = roomRef.collection("rounds").document(roundDocId(gameCount, currentRound))
         val answerRef = roundRef.collection("answers").document(playerId)
 
         if (answerRef.get().await().exists()) error("すでに回答済みです")
@@ -167,7 +198,8 @@ class FirebaseRepository {
         if (roomData["status"] != "ANSWERING") return@runCatching // すでに遷移済み
 
         val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: return@runCatching
-        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val gameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val roundRef = roomRef.collection("rounds").document(roundDocId(gameCount, currentRound))
         val answers = roundRef.collection("answers").get().await()
 
         advanceToPredicting(roomRef, roomData, answers)
@@ -206,7 +238,8 @@ class FirebaseRepository {
         if (roomData["status"] != "PREDICTING") error("予測フェーズではありません")
 
         val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: error("ラウンド情報なし")
-        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val gameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val roundRef = roomRef.collection("rounds").document(roundDocId(gameCount, currentRound))
         val answerRef = roundRef.collection("answers").document(playerId)
 
         answerRef.update(
@@ -238,10 +271,48 @@ class FirebaseRepository {
         if (roomData["status"] != "PREDICTING") return@runCatching // すでに確定済み
 
         val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: return@runCatching
-        val roundRef = roomRef.collection("rounds").document(currentRound.toString())
+        val gameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val roundRef = roomRef.collection("rounds").document(roundDocId(gameCount, currentRound))
         val answers = roundRef.collection("answers").get().await()
 
         finalizeRound(roomRef, roomData, currentRound, answers.documents)
+    }
+
+    // ── 再戦（同一ルームを再利用してもう一度遊ぶ） ─────────
+    // 「もう一度遊ぶ」はホストのみが呼び出せる（FinishedScreen で isHost のみボタン表示）。
+    // status を WAITING に戻し、スコア・ラウンド状態をクリアする。category は引き継ぐ。
+    // gameCount をインクリメントすることで、次に始まるゲームの rounds/{gameCount}_{round}
+    // ドキュメントIDが前ゲームと衝突しなくなり、submitAnswer() の「すでに回答済みです」を防ぐ。
+    suspend fun restartGame(roomId: String): Result<Unit> = runCatching {
+        val roomRef = db.collection("rooms").document(roomId)
+        val roomData = roomRef.get().await().data ?: error("ルームが見つかりません")
+
+        if (roomData["status"] != "FINISHED") error("ゲーム終了後にのみ再戦できます")
+
+        val prevGameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val lastQuestion = roomData["currentQuestion"] as? Map<*, *>
+        val lastQuestionId = lastQuestion?.get("questionId") as? String
+
+        val updates = mutableMapOf<String, Any?>(
+            "status" to "WAITING",
+            "currentRound" to 0,
+            "gameCount" to (prevGameCount + 1),
+            "questionQueue" to FieldValue.delete(),
+            "currentQuestion" to null,
+            "answerCounts" to emptyMap<String, Int>(),
+            "roundScores" to emptyList<Any>(),
+            "finalScores" to emptyList<Any>(),
+            "cumulativeTotals" to emptyMap<String, Int>(),
+            "nextRound" to FieldValue.delete(),
+            "restartedAt" to FieldValue.serverTimestamp(),
+        )
+        if (lastQuestionId != null) {
+            updates["lastPlayedQuestionId"] = lastQuestionId
+        } else {
+            updates["lastPlayedQuestionId"] = FieldValue.delete()
+        }
+
+        roomRef.update(updates).await()
     }
 
     // ── 次のラウンドへ進む（ホストが呼び出す） ─────────────
@@ -403,5 +474,9 @@ class FirebaseRepository {
 
 private fun calculateScore(actual: Int, predicted: Int): Int =
     maxOf(0, 100 - kotlin.math.abs(predicted - actual) * 20)
+
+// rounds サブコレクションのドキュメントID。gameCount を含めることで、restartGame() 後の
+// 2ゲーム目が前ゲームの rounds/{round}/answers と衝突しないようにする（Issue #17）。
+private fun roundDocId(gameCount: Long, round: Int): String = "${gameCount}_${round}"
 
 private const val TOTAL_ROUNDS_PER_GAME = 5

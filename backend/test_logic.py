@@ -214,6 +214,85 @@ r_perfect_preds = [("X", "はい", 3)]
 totals_5 = simulate_rounds([(r_perfect_counts, r_perfect_preds)] * 5)
 check("5ラウンド満点: 500点", totals_5["X"] == 500, f"実際={totals_5['X']}")
 
+# ── TEST 9: 再戦（restartGame, Issue #17）───────────────────
+print("\n[TEST 9] 再戦ロジック")
+
+
+def round_doc_id(game_count: int, round_num: int) -> str:
+    """FirebaseRepository.roundDocId() / index.html roundDocId() と同じ形式。"""
+    return f"{game_count}_{round_num}"
+
+
+check("1ゲーム目 round=1 のID", round_doc_id(1, 1) == "1_1")
+check("2ゲーム目（再戦後）round=1 のID", round_doc_id(2, 1) == "2_1")
+check("gameCountが違えば同じroundでも別ID",
+      round_doc_id(1, 3) != round_doc_id(2, 3),
+      f"{round_doc_id(1, 3)} vs {round_doc_id(2, 3)}")
+
+
+def pick_first_question(question_queue: list[dict], avoid_question_id: str | None) -> list[dict]:
+    """
+    startGame() の「前ゲーム最後の質問を1問目にしない」ロジックの純粋関数版。
+    Kotlin(FirebaseRepository.startGame) / JS(index.html startGame) と同じ優先順位:
+      1. queue内に別の質問があれば先頭と入れ替え
+      2. queue内が全部同じ質問なら諦める（呼び出し側でプール全体から探す運用は別途）
+    """
+    if not avoid_question_id or not question_queue:
+        return question_queue
+    if question_queue[0]["questionId"] != avoid_question_id:
+        return question_queue
+    alt_index = next(
+        (i for i, q in enumerate(question_queue) if q["questionId"] != avoid_question_id),
+        -1,
+    )
+    if alt_index > 0:
+        swapped = question_queue[:]
+        swapped[0], swapped[alt_index] = swapped[alt_index], swapped[0]
+        return swapped
+    return question_queue  # 代替なし
+
+
+queue_a = [{"questionId": "f001"}, {"questionId": "f002"}, {"questionId": "f003"}]
+result_a = pick_first_question(queue_a, "f001")
+check("前ゲーム最後の質問が1問目なら入れ替える", result_a[0]["questionId"] != "f001",
+      f"1問目={result_a[0]['questionId']}")
+
+queue_b = [{"questionId": "f002"}, {"questionId": "f001"}, {"questionId": "f003"}]
+result_b = pick_first_question(queue_b, "f001")
+check("1問目が対象外ならそのまま", result_b == queue_b)
+
+queue_c = [{"questionId": "f001"}]
+result_c = pick_first_question(queue_c, "f001")
+check("キューが1問だけ（全部同じ）なら諦めてそのまま返す", result_c == queue_c)
+
+check("avoid_question_id が None なら何もしない", pick_first_question(queue_a, None) == queue_a)
+
+# ── TEST 10: 再戦時のスコアリセット ──────────────────────────
+print("\n[TEST 10] 再戦時のスコアリセット")
+
+
+def restart_room_fields(prev_game_count: int) -> dict:
+    """restartGame() が上書きするフィールドの純粋関数版（category は含めない＝引き継ぐ）。"""
+    return {
+        "status": "WAITING",
+        "currentRound": 0,
+        "gameCount": prev_game_count + 1,
+        "currentQuestion": None,
+        "answerCounts": {},
+        "roundScores": [],
+        "finalScores": [],
+        "cumulativeTotals": {},
+    }
+
+
+restarted = restart_room_fields(prev_game_count=1)
+check("status が WAITING に戻る", restarted["status"] == "WAITING")
+check("currentRound が 0 にリセットされる", restarted["currentRound"] == 0)
+check("gameCount がインクリメントされる", restarted["gameCount"] == 2)
+check("cumulativeTotals が空になる（前ゲームのスコアを持ち越さない）",
+      restarted["cumulativeTotals"] == {})
+check("category キーは含まれない（＝引き継ぎ、上書きしない）", "category" not in restarted)
+
 # ─── 結果サマリー ─────────────────────────────────────────────
 print("\n" + "=" * 55)
 if errors:

@@ -170,7 +170,8 @@
     <div class="score-card">
       <div id="final-scores"></div>
     </div>
-    <button class="btn-primary" onclick="resetGame()" style="margin-top:16px">トップに戻る</button>
+    <button class="btn-primary" id="restart-btn" onclick="restartGame()" style="margin-top:16px;display:none">もう一度遊ぶ</button>
+    <button class="btn-secondary" onclick="resetGame()" style="margin-top:8px">トップに戻る</button>
   </div>
 </div>
 
@@ -179,7 +180,7 @@
   import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
   import {
     getFirestore, doc, collection, setDoc, updateDoc, getDoc, getDocs,
-    onSnapshot, serverTimestamp, increment
+    onSnapshot, serverTimestamp, increment, deleteField
   } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
   const app = initializeApp({
@@ -229,6 +230,7 @@
   window.submitAnswer = submitAnswer;
   window.submitPrediction = submitPrediction;
   window.resetGame = resetGame;
+  window.restartGame = restartGame;
 
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -267,6 +269,9 @@
       hostName, hostUid: state.uid,
       status: 'WAITING', currentRound: 0, totalRounds: 5,
       currentQuestion: null, category, createdAt: serverTimestamp(),
+      // 再戦（restartGame）ごとにインクリメントする世代番号。
+      // rounds/{gameCount}_{round} のドキュメントIDに使い、前ゲームの回答と衝突させない（Issue #17）。
+      gameCount: 1,
     });
     await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
       nickname: hostName, isHost: true, joinedAt: serverTimestamp(),
@@ -354,6 +359,14 @@
         }
       } else if (phase === 'FINISHED') {
         renderFinished(data);
+      } else if (phase === 'WAITING') {
+        // ホストの「もう一度遊ぶ」（restartGame）で FINISHED → WAITING に戻った場合、
+        // ルームID再入力・QR再スキャンなしで全員を自動的に待合室へ戻す（Issue #17）。
+        clearTimeout(state.autoAdvanceTimer);
+        document.getElementById('display-room-id').textContent = state.roomId;
+        document.getElementById('host-controls').style.display = state.isHost ? 'block' : 'none';
+        document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
+        showScreen('waiting');
       }
     });
   }
@@ -426,6 +439,13 @@
     return a;
   }
 
+  // rounds サブコレクションのドキュメントID。gameCount を含めることで、restartGame() 後の
+  // 2ゲーム目が前ゲームの rounds/{round}/answers と衝突しないようにする（Issue #17）。
+  // Android（FirebaseRepository.roundDocId）と同じ形式にすること。
+  function roundDocId(gameCount, round) {
+    return `${gameCount || 1}_${round}`;
+  }
+
   async function startGame() {
     const roomRef = doc(db, 'rooms', state.roomId);
     const roomSnap = await getDoc(roomRef);
@@ -433,13 +453,28 @@
     const tags = categoryTags(roomData.category);
     const filtered = ALL_QUESTIONS.filter(q => q.tags.some(t => tags.includes(t)));
     const pool = filtered.length > 0 ? filtered : ALL_QUESTIONS;
-    const questionQueue = shuffleArray(pool).slice(0, TOTAL_ROUNDS_PER_GAME);
+    let questionQueue = shuffleArray(pool).slice(0, TOTAL_ROUNDS_PER_GAME);
+
+    // 再戦時、前ゲーム最後の質問がそのまま1問目にならないよう、可能なら入れ替える（Issue #17）。
+    const avoidQuestionId = roomData.lastPlayedQuestionId;
+    if (avoidQuestionId && questionQueue[0] && questionQueue[0].questionId === avoidQuestionId) {
+      const altIndex = questionQueue.findIndex(q => q.questionId !== avoidQuestionId);
+      if (altIndex > 0) {
+        [questionQueue[0], questionQueue[altIndex]] = [questionQueue[altIndex], questionQueue[0]];
+      } else {
+        const usedIds = new Set(questionQueue.map(q => q.questionId));
+        const replacement = pool.find(q => q.questionId !== avoidQuestionId && !usedIds.has(q.questionId));
+        if (replacement) questionQueue = [replacement, ...questionQueue.slice(1)];
+      }
+    }
+
     await updateDoc(roomRef, {
       status: 'ANSWERING', currentRound: 1,
       totalRounds: questionQueue.length,
       questionQueue: questionQueue,
       currentQuestion: questionQueue[0], startedAt: serverTimestamp(),
       phaseStartedAt: serverTimestamp(),
+      lastPlayedQuestionId: deleteField(),
     });
   }
 
@@ -469,15 +504,16 @@
     const roomRef = doc(db, 'rooms', state.roomId);
     const roomData = (await getDoc(roomRef)).data();
     const currentRound = roomData.currentRound;
-    const roundRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound));
-    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers', state.uid);
+    const roundId = roundDocId(roomData.gameCount, currentRound);
+    const roundRef = doc(db, 'rooms', state.roomId, 'rounds', roundId);
+    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
 
     await setDoc(answerRef, { answer, answeredAt: serverTimestamp() });
 
     // 全員回答したか確認
     const [players, answers] = await Promise.all([
       getDocs(collection(db, 'rooms', state.roomId, 'players')),
-      getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers')),
+      getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
     ]);
 
     if (answers.size >= players.size) {
@@ -509,7 +545,8 @@
     if (roomData.status !== 'ANSWERING') return; // すでに遷移済み
 
     const currentRound = roomData.currentRound;
-    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers'));
+    const roundId = roundDocId(roomData.gameCount, currentRound);
+    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers'));
     await advanceToPredicting(roomRef, roomData, answers.docs);
   }
 
@@ -543,14 +580,15 @@
     const roomRef = doc(db, 'rooms', state.roomId);
     const roomData = (await getDoc(roomRef)).data();
     const currentRound = roomData.currentRound;
-    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers', state.uid);
+    const roundId = roundDocId(roomData.gameCount, currentRound);
+    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
 
     await updateDoc(answerRef, { prediction: predictedCount, targetOption, predictedAt: serverTimestamp() });
 
     // 全員予測したか確認
     const [players, answers] = await Promise.all([
       getDocs(collection(db, 'rooms', state.roomId, 'players')),
-      getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers')),
+      getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
     ]);
 
     const predicted = answers.docs.filter(d => d.data().prediction !== undefined);
@@ -570,7 +608,8 @@
     if (roomData.status !== 'PREDICTING') return; // すでに確定済み
 
     const currentRound = roomData.currentRound;
-    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', String(currentRound), 'answers'));
+    const roundId = roundDocId(roomData.gameCount, currentRound);
+    const answers = await getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers'));
     await finalizeRound(roomRef, roomData, currentRound, answers.docs);
   }
 
@@ -715,7 +754,40 @@
         <span class="score-pts">${s.roundScore}点</span>
       </div>`;
     }).join('');
+    // 「もう一度遊ぶ」はホストにのみ表示（Android の FinishedScreen と同様）。
+    document.getElementById('restart-btn').style.display = state.isHost ? 'block' : 'none';
     showScreen('finished');
+  }
+
+  // ── 再戦（同一ルームを再利用してもう一度遊ぶ、ホストのみ） ──
+  // status を WAITING に戻す。observeRoom（onSnapshot）がその遷移を検知し、
+  // 参加者側の画面も含めて自動で待機室へ戻す。category は引き継ぐ。
+  // gameCount をインクリメントし、rounds/{gameCount}_{round} のドキュメントIDを次ゲームで
+  // 変えることで、submitAnswer() の「すでに回答済みです」を防ぐ（Issue #17）。
+  async function restartGame() {
+    const roomRef = doc(db, 'rooms', state.roomId);
+    const roomSnap = await getDoc(roomRef);
+    if (!roomSnap.exists()) return;
+    const roomData = roomSnap.data();
+    if (roomData.status !== 'FINISHED') return;
+
+    const prevGameCount = roomData.gameCount || 1;
+    const lastQuestionId = roomData.currentQuestion ? roomData.currentQuestion.questionId : null;
+
+    await updateDoc(roomRef, {
+      status: 'WAITING',
+      currentRound: 0,
+      gameCount: prevGameCount + 1,
+      questionQueue: deleteField(),
+      currentQuestion: null,
+      answerCounts: {},
+      roundScores: [],
+      finalScores: [],
+      cumulativeTotals: {},
+      nextRound: deleteField(),
+      restartedAt: serverTimestamp(),
+      lastPlayedQuestionId: lastQuestionId || deleteField(),
+    });
   }
 
   function resetGame() {
