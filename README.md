@@ -198,6 +198,7 @@ Android / ブラウザ
   "cumulativeTotals": { "<playerId>": 240 },
   "nextRound": 2,
   "phaseStartedAt": "timestamp",
+  "gameCount": 1,
   "createdAt": "timestamp",
   "startedAt": "timestamp",
   "finishedAt": "timestamp"
@@ -214,13 +215,14 @@ Android / ブラウザ
 ## ゲームの状態遷移
 
 ```
-WAITING → ANSWERING → PREDICTING → RESULT → ANSWERING → ...→ FINISHED
+WAITING → ANSWERING → PREDICTING → RESULT → ANSWERING → ...→ FINISHED → (再戦) WAITING
 ```
 
 - 全員が回答したら自動で `PREDICTING` へ遷移
 - 全員が予測したら自動で `RESULT` へ遷移
 - ホストが10秒後に自動で次ラウンド（`ANSWERING`）へ進行
 - 最終ラウンド終了後は `FINISHED` へ遷移
+- ホストが終了画面で「もう一度遊ぶ」を押すと、同一ルームのまま `WAITING` に戻る（参加者はルームID再入力・QR再スキャン不要）。「トップに戻る」はルームを離脱するだけで `WAITING` には戻らない。詳細は [docs/architecture.md](docs/architecture.md#フェーズ状態遷移)
 
 ### タイムアウトによる遷移
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -13,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rokusoudo.hitokazu.data.model.GamePhase
 import com.rokusoudo.hitokazu.data.model.PlayerScore
 import com.rokusoudo.hitokazu.ui.components.ConnectionBanner
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
@@ -22,9 +24,19 @@ fun FinishedScreen(
     viewModel: GameViewModel,
     onRestart: () -> Unit,
     onHome: () -> Unit,
+    onWaitingRoom: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val winner = uiState.scores.firstOrNull()
+
+    // ホストが「もう一度遊ぶ」を押すと restartGame() が status を WAITING に戻す。
+    // observeRoom 経由でその遷移を検知したら、参加者側も含めて全員が自動で待合室へ戻る
+    // （ルームID再入力・QR再スキャン不要にするための仕組み。Issue #17）。
+    LaunchedEffect(uiState.phase) {
+        if (uiState.phase == GamePhase.WAITING) {
+            onWaitingRoom()
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ConnectionBanner(
