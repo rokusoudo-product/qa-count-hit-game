@@ -64,6 +64,9 @@ class FirebaseRepository {
                 // rounds/{gameCount}_{round} のドキュメントIDに使い、前ゲームの回答と衝突させない（Issue #17）。
                 "gameCount" to 1L,
                 "createdAt" to FieldValue.serverTimestamp(),
+                // 参加者が join した直後からホスト離脱判定の基準を持てるよう、作成時点でも書いておく
+                // （初回の定期ハートビートが届くまでの間、判定対象がnullで判定をスキップされる隙間を埋める）。
+                "hostHeartbeatAt" to FieldValue.serverTimestamp(),
             )
         ).await()
 
@@ -276,6 +279,29 @@ class FirebaseRepository {
         val answers = roundRef.collection("answers").get().await()
 
         finalizeRound(roomRef, roomData, currentRound, answers.documents)
+    }
+
+    // ── ホストのハートビート送信（ホスト端末が定期的に呼び出す） ──
+    // 一定間隔でルームドキュメントに serverTimestamp を書き込む。参加者端末はこの値の
+    // 更新が止まったことをもってホスト離脱と判定する（Issue #15）。
+    suspend fun sendHostHeartbeat(roomId: String): Result<Unit> = runCatching {
+        db.collection("rooms").document(roomId).update(
+            mapOf("hostHeartbeatAt" to FieldValue.serverTimestamp())
+        ).await()
+    }
+
+    // ── ホスト離脱によるルーム終了（参加者端末が呼び出す） ──
+    // hostHeartbeatAt の更新が閾値時間止まったと判定した参加者端末が呼び出す。
+    // すでにゲームが終了・確定済み（FINISHED/HOST_LEFT）の場合は何もしない
+    // （古いハートビート監視タイマーが後から発火した場合の二重確定を防ぐ）。
+    suspend fun terminateRoomHostLeft(roomId: String): Result<Unit> = runCatching {
+        val roomRef = db.collection("rooms").document(roomId)
+        val roomData = roomRef.get().await().data ?: return@runCatching
+
+        val status = roomData["status"] as? String
+        if (status == "FINISHED" || status == "HOST_LEFT") return@runCatching
+
+        roomRef.update(mapOf("status" to "HOST_LEFT")).await()
     }
 
     // ── 再戦（同一ルームを再利用してもう一度遊ぶ） ─────────

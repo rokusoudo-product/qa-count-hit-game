@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -29,6 +30,7 @@ object Routes {
     const val PREDICTING = "predicting"
     const val RESULT = "result"
     const val FINISHED = "finished"
+    const val HOST_LEFT = "host_left"
 }
 
 class MainActivity : ComponentActivity() {
@@ -46,6 +48,17 @@ class MainActivity : ComponentActivity() {
 
                 // 起動時のディープリンクを処理
                 handleInviteIntent(intent, vm)
+
+                // ホスト離脱によるルーム終了は、参加者がどの画面にいても割り込むため、
+                // 各画面個別のLaunchedEffectではなくここで一括して監視する（Issue #15）。
+                val uiState by vm.uiState.collectAsState()
+                LaunchedEffect(uiState.phase) {
+                    if (uiState.phase == GamePhase.HOST_LEFT) {
+                        navController.navigate(Routes.HOST_LEFT) {
+                            popUpTo(Routes.HOME)
+                        }
+                    }
+                }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     NavHost(
@@ -110,6 +123,16 @@ class MainActivity : ComponentActivity() {
                                 onFinished = {
                                     navController.navigate(Routes.FINISHED) {
                                         popUpTo(Routes.HOME)
+                                    }
+                                },
+                            )
+                        }
+                        composable(Routes.HOST_LEFT) {
+                            HostLeftScreen(
+                                onLeaveRoom = {
+                                    vm.resetGame()
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
                                     }
                                 },
                             )

@@ -61,7 +61,10 @@ data class Player(
 )
 
 enum class GamePhase {
-    WAITING, ANSWERING, PREDICTING, RESULT, FINISHED
+    WAITING, ANSWERING, PREDICTING, RESULT, FINISHED,
+    // ホスト端末のハートビート（hostHeartbeatAt）が一定時間更新されなくなったことを
+    // 参加者端末が検知し、ルームを終了させたときの状態（Issue #15）。
+    HOST_LEFT
 }
 
 // ── Firestore Snapshot ────────────────────────────────────────
@@ -77,6 +80,9 @@ data class RoomSnapshot(
     // 現在のフェーズ（ANSWERING/PREDICTING）が開始したサーバー時刻（epoch millis）。
     // タイムアウト判定はこの値を基準に行う（端末時計や監視開始タイミングに依存させないため）。
     val phaseStartedAtMillis: Long?,
+    // ホスト端末が最後にハートビートを書き込んだサーバー時刻（epoch millis）。
+    // 参加者端末はこの値の更新が一定時間止まったことをもってホスト離脱と判定する（Issue #15）。
+    val hostHeartbeatAtMillis: Long?,
 ) {
     companion object {
         @Suppress("UNCHECKED_CAST")
@@ -114,6 +120,7 @@ data class RoomSnapshot(
                 } ?: emptyList()
 
             val phaseStartedAtMillis = (data["phaseStartedAt"] as? com.google.firebase.Timestamp)?.toDate()?.time
+            val hostHeartbeatAtMillis = (data["hostHeartbeatAt"] as? com.google.firebase.Timestamp)?.toDate()?.time
 
             return RoomSnapshot(
                 status = phase,
@@ -124,6 +131,7 @@ data class RoomSnapshot(
                 roundScores = parseScores("roundScores"),
                 finalScores = parseScores("finalScores"),
                 phaseStartedAtMillis = phaseStartedAtMillis,
+                hostHeartbeatAtMillis = hostHeartbeatAtMillis,
             )
         }
     }
