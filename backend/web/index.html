@@ -130,6 +130,7 @@
       <button class="btn-primary" id="start-btn" onclick="startGame()" disabled>ゲームを開始する</button>
     </div>
     <p class="waiting-count" id="guest-waiting-msg" style="display:none">ホストがゲームを開始するまでお待ちください</p>
+    <button class="btn-secondary" onclick="resetGame()" style="margin-top:16px">退室する</button>
   </div>
 
   <!-- 回答画面 -->
@@ -187,7 +188,7 @@
   import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
   import {
     getFirestore, doc, collection, setDoc, updateDoc, getDoc, getDocs,
-    onSnapshot, serverTimestamp, increment, deleteField
+    onSnapshot, serverTimestamp, increment, deleteField, deleteDoc
   } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
   const app = initializeApp({
@@ -321,6 +322,22 @@
     });
 
     enterRoom();
+  }
+
+  // ── ルーム退室（参加者が明示的に呼び出す） ─────────────
+  // rooms/{roomId}/players/{uid} を削除する。待合室の参加者一覧・満員判定（joinRoom）・
+  // 全員提出判定（submitAnswer/submitPrediction の players.size）から即座に外れる（Issue #33）。
+  // ホストの離脱はこの経路では扱わない（呼び出し元でstate.isHostのときは呼ばない。
+  // ホスト離脱はハートビート停止検知でルームごと終了させるため、二重の仕組みにしない）。
+  // 送信済みの回答・予測（rounds/{gameCount}_{round}/answers/{uid}）は意図的に削除しない
+  // （実装コストと挙動変更のリスクを避けるため。Issue #33 で明示した判断）。
+  async function leaveRoom() {
+    if (!state.roomId || !state.uid) return;
+    try {
+      await deleteDoc(doc(db, 'rooms', state.roomId, 'players', state.uid));
+    } catch (err) {
+      console.error('leaveRoom failed', err);
+    }
   }
 
   function enterRoom() {
@@ -884,7 +901,15 @@
     });
   }
 
+  // 「トップに戻る」（screen-finished/screen-host-left）・待合室の「退室する」から
+  // 共通で呼ばれる。参加者（ホスト以外）の場合は、ローカル状態を破棄する前に
+  // 自分のplayersドキュメントをFirestoreから削除する（Issue #33）。
+  // ホストはここでは削除しない（ホスト離脱はハートビート停止検知の経路に一本化する）。
   function resetGame() {
+    if (!state.isHost) {
+      leaveRoom();
+    }
+
     if (state.roomUnsub) state.roomUnsub();
     if (state.playersUnsub) state.playersUnsub();
     clearTimeout(state.autoAdvanceTimer);

@@ -293,6 +293,41 @@ check("cumulativeTotals が空になる（前ゲームのスコアを持ち越�
       restarted["cumulativeTotals"] == {})
 check("category キーは含まれない（＝引き継ぎ、上書きしない）", "category" not in restarted)
 
+# ── TEST 11: 退室（leaveRoom）によるゴースト参加者の解消（Issue #33）───
+print("\n[TEST 11] 退室後のフェーズ遷移（幽霊参加者の解消）")
+
+# 3人ルームで1人が回答フェーズ中に退室すると、players/{uid} が削除され
+# player_count が実質のプレイヤー数まで減る。should_transition_to_predicting /
+# should_finalize_round は answer_count(prediction_count) >= player_count の
+# 単純な比較なので、退室によってplayer_countが減れば残り全員の提出だけで
+# タイムアウトを待たずに遷移条件が成立する（改修不要・Issue #33 提案の前提）。
+check(
+    "3人中1人退室後、残り2人の回答で PREDICTING へ遷移する",
+    should_transition_to_predicting(answer_count=2, player_count=2),
+)
+check(
+    "退室前（3人ぶんの player_count）のままなら2人の回答では遷移しない",
+    not should_transition_to_predicting(answer_count=2, player_count=3),
+)
+check(
+    "3人中1人退室後、残り2人の予測でラウンドが確定する",
+    should_finalize_round(prediction_count=2, player_count=2),
+)
+
+# 既知の限界（PRに明記する）: 唯一の未提出者自身が退室した場合、退室した本人は
+# isPlayer()を満たさなくなり以後roomを更新できないため、この >= 判定を再評価する
+# 「提出イベント」がもう発生しない。結果としてこのケースはホストのタイムアウト
+# 強制確定（forceAdvanceFromAnswering/forceFinalizeFromPredicting）で進行する。
+# つまり「未提出者自身の退室」は本Issueの改善対象外（受け入れ基準は残り全員が
+# 提出した後に退室者がいるケースを想定しており、この限界には抵触しない）。
+check(
+    "（既知の限界の確認）全員提出済みで最後の1人が退室しても、"
+    "遷移トリガーは新たな提出イベントに依存する",
+    should_transition_to_predicting(answer_count=2, player_count=2),
+    "退室者自身の提出はもう起きないため、他の提出イベントか"
+    "タイムアウトが遷移のトリガーになる",
+)
+
 # ─── 結果サマリー ─────────────────────────────────────────────
 print("\n" + "=" * 55)
 if errors:

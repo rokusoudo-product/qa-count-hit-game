@@ -19,6 +19,7 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from '
 
 const HOST = 'host-uid';
 const PLAYER = 'player-uid';
+const PLAYER2 = 'player2-uid'; // PLAYERと同じルームの参加者（ホストではない）
 const OUTSIDER = 'outsider-uid'; // 匿名認証は通っているが、このルームの参加者ではない
 const ROOM = 'ROOM1234';
 
@@ -37,6 +38,7 @@ async function seedRoom() {
     });
     await setDoc(doc(db, `rooms/${ROOM}/players/${HOST}`), { nickname: 'ホスト太郎', isHost: true });
     await setDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`), { nickname: 'アリス', isHost: false });
+    await setDoc(doc(db, `rooms/${ROOM}/players/${PLAYER2}`), { nickname: 'ボブ', isHost: false });
     await setDoc(doc(db, `rooms/${ROOM}/rounds/1/answers/${PLAYER}`), { answer: 'はい' });
   });
 }
@@ -135,7 +137,8 @@ describe('rooms/{roomId}/players — 参加者', () => {
     );
   });
 
-  it('自分は退室できる', async () => {
+  // Issue #33: 明示的な退室（resetGame/leaveRoom）がplayers/{uid}を削除する経路の権限確認。
+  it('自分は退室できる（自分のplayersドキュメントは削除できる）', async () => {
     const db = testEnv.authenticatedContext(PLAYER).firestore();
     await assertSucceeds(deleteDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`)));
   });
@@ -145,9 +148,16 @@ describe('rooms/{roomId}/players — 参加者', () => {
     await assertSucceeds(deleteDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`)));
   });
 
-  it('部外者は参加者を削除できない', async () => {
+  it('部外者は参加者を削除できない（他人のplayersドキュメントは削除できない）', async () => {
     const db = testEnv.authenticatedContext(OUTSIDER).firestore();
     await assertFails(deleteDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`)));
+  });
+
+  it('ホストでない参加者は、他の参加者のplayersドキュメントを削除できない（他人のものは削除できない）', async () => {
+    // PLAYERとPLAYER2はどちらも同じルームの参加者（isPlayer()は真）だが、
+    // ホストでも本人でもないPLAYERがPLAYER2のドキュメントを削除しようとするケース。
+    const db = testEnv.authenticatedContext(PLAYER).firestore();
+    await assertFails(deleteDoc(doc(db, `rooms/${ROOM}/players/${PLAYER2}`)));
   });
 });
 

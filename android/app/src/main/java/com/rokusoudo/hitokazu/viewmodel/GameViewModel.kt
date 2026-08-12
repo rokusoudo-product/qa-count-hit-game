@@ -402,7 +402,23 @@ class GameViewModel : ViewModel() {
         }
     }
 
+    // ── 離脱・ローカル状態のリセット ──────────────────────────
+    // 「トップに戻る」（FinishedScreen）・ホスト離脱後の退室（HostLeftScreen）・
+    // 待合室/ゲーム中の「退室する」（WaitingRoomScreen等）から共通で呼ばれる。
+    // 参加者（ホスト以外）の場合は、ローカル状態を破棄する前に自分の
+    // players/{uid} ドキュメントをFirestoreから削除する（Issue #33）。
+    // ホストはここでは削除しない（ホスト離脱はハートビート停止検知の経路に一本化する）。
     fun resetGame() {
+        val state = _uiState.value
+        if (!state.isHost && state.roomId.isNotEmpty() && state.playerId.isNotEmpty()) {
+            val roomId = state.roomId
+            val playerId = state.playerId
+            viewModelScope.launch {
+                repo.leaveRoom(roomId, playerId)
+                    .onFailure { Log.e("GameViewModel", "leaveRoom failed", it) }
+            }
+        }
+
         autoAdvanceJob?.cancel()
         answeringTimeoutJob?.cancel()
         predictingTimeoutJob?.cancel()

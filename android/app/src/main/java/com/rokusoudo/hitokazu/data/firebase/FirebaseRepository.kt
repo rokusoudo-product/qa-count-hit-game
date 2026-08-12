@@ -109,6 +109,20 @@ class FirebaseRepository {
         JoinRoomResponse(playerId = uid, roomId = roomId, nickname = nickname)
     }
 
+    // ── ルーム退室（参加者が明示的に呼び出す） ─────────────
+    // rooms/{roomId}/players/{playerId} を削除する。これにより待合室の参加者一覧・
+    // 満員判定（joinRoom）・全員提出判定（submitAnswer/submitPrediction の players.size()）
+    // から即座に外れる（Issue #33）。
+    // ホストの離脱はこの経路では扱わない（呼び出し側でisHostのときは呼ばない。
+    // ホスト離脱はハートビート停止検知でルームごと終了させるため、二重の仕組みにしない）。
+    // 送信済みの回答・予測（rounds/{gameCount}_{round}/answers/{playerId}）は意図的に削除しない
+    // （実装コストと挙動変更のリスクを避けるため。Issue #33 で明示した判断）。
+    suspend fun leaveRoom(roomId: String, playerId: String): Result<Unit> = runCatching {
+        db.collection("rooms").document(roomId)
+            .collection("players").document(playerId)
+            .delete().await()
+    }
+
     // ── ゲーム開始 ──────────────────────────────────────────
     suspend fun startGame(roomId: String): Result<Unit> = runCatching {
         val roomSnap = db.collection("rooms").document(roomId).get().await()

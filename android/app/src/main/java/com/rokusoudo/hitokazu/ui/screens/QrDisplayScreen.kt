@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -27,6 +28,7 @@ private const val INVITE_BASE_URL = "https://hitokazu.rokusoudo.com/join/"
 fun QrDisplayScreen(
     viewModel: GameViewModel,
     onGameStarted: () -> Unit,
+    onLeaveRoom: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -37,6 +39,14 @@ fun QrDisplayScreen(
         if (uiState.phase == GamePhase.ANSWERING) {
             onGameStarted()
         }
+    }
+
+    // システムバックキーでも「退室する」ボタンと同じ処理を実行する（Issue #33）。
+    // このボタンはホスト専用画面のため、resetGame() は players ドキュメントを削除しない
+    // （ホスト離脱はハートビート停止検知の経路に一本化する）。
+    BackHandler {
+        viewModel.resetGame()
+        onLeaveRoom()
     }
 
     val bitmap = remember(uiState.roomId) {
@@ -146,6 +156,16 @@ fun QrDisplayScreen(
                        else "ゲームを開始する (${uiState.players.size}人)",
                 fontSize = 16.sp,
             )
+        }
+
+        OutlinedButton(
+            onClick = {
+                viewModel.resetGame()
+                onLeaveRoom()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("退室する", fontSize = 14.sp)
         }
     }
 }
