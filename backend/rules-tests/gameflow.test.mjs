@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
 const HOST = 'flow-host';
 const P2 = 'flow-p2';
@@ -265,5 +265,152 @@ describe('ホスト離脱によるルーム終了（Issue #15）', () => {
     await assertFails(
       updateDoc(doc(outsiderDb, `rooms/${HB_ROOM}`), { status: 'HOST_LEFT' }),
     );
+  });
+});
+
+// Issue #33: 明示的な退室（leaveRoom = players/{uid} の削除）で「幽霊」参加者を解消する。
+// 全員提出判定（submitAnswer/submitPrediction の answers.size() >= players.size()）は
+// クライアント側ロジック（FirebaseRepository.kt / index.html）にあり、ルールでは検証できない。
+// ここでは leaveRoom() と同じ操作（自分のplayersドキュメント削除）がルール上許可されること、
+// および退室後に players コレクションの件数が実際に減ることを確認する
+// （残りの参加者が提出した時点で >= 比較が成立し、タイムアウトを待たずに遷移できる根拠）。
+describe('退室（leaveRoom）でゴーストプレイヤーを解消する（Issue #33）', () => {
+  const LEAVE_ROOM = 'LEAVEROOM';
+
+  it('1) 3人ルームを作成し、回答フェーズまで進める', async () => {
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${LEAVE_ROOM}`), {
+        hostName: 'ホスト太郎',
+        hostUid: HOST,
+        status: 'WAITING',
+        currentRound: 0,
+        totalRounds: 5,
+        category: 'ALL',
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${LEAVE_ROOM}/players/${HOST}`), { nickname: 'ホスト太郎', isHost: true }),
+    );
+    for (const uid of [P2, P3]) {
+      const db = testEnv.authenticatedContext(uid).firestore();
+      await assertSucceeds(
+        setDoc(doc(db, `rooms/${LEAVE_ROOM}/players/${uid}`), { nickname: uid, isHost: false }),
+      );
+    }
+
+    await assertSucceeds(
+      updateDoc(doc(hostDb, `rooms/${LEAVE_ROOM}`), {
+        status: 'ANSWERING',
+        currentRound: 1,
+        gameCount: 1,
+        currentQuestion: { questionId: 'q001', text: 'テスト質問', options: ['はい', 'いいえ'] },
+      }),
+    );
+  });
+
+  it('2) P3が回答フェーズ中に退室できる（自分のplayersドキュメントを削除）', async () => {
+    const p3Db = testEnv.authenticatedContext(P3).firestore();
+    await assertSucceeds(deleteDoc(doc(p3Db, `rooms/${LEAVE_ROOM}/players/${P3}`)));
+
+    // 退室直後、players一覧から幽霊が消えている（待合室プレイヤー一覧の見え方と同じ根拠）。
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    const players = await assertSucceeds(getDocs(collection(hostDb, `rooms/${LEAVE_ROOM}/players`)));
+    assert.strictEqual(players.size, 2, '退室した参加者はplayersから消える');
+  });
+
+  it('3) 退室後、残り2人が回答すればタイムアウトなしでPREDICTINGへ遷移できる条件が満たされる', async () => {
+    const answers = { [HOST]: 'はい', [P2]: 'いいえ' };
+    for (const [uid, answer] of Object.entries(answers)) {
+      const db = testEnv.authenticatedContext(uid).firestore();
+      await assertSucceeds(
+        setDoc(doc(db, `rooms/${LEAVE_ROOM}/rounds/1_1/answers/${uid}`), { answer }),
+      );
+    }
+
+    // FirebaseRepository.submitAnswer / index.html submitAnswer と同じ判定:
+    // 幽霊（P3）が抜けたため players.size===2 で、2人の回答だけで >= が成立する
+    // （P3が残っていればanswers.size(2) < players.size(3)でタイムアウト待ちになっていたはず）。
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    const players = await assertSucceeds(getDocs(collection(hostDb, `rooms/${LEAVE_ROOM}/players`)));
+    const answerDocs = await assertSucceeds(
+      getDocs(collection(hostDb, `rooms/${LEAVE_ROOM}/rounds/1_1/answers`)),
+    );
+    assert.strictEqual(players.size, 2);
+    assert.strictEqual(answerDocs.size, 2);
+    assert.ok(answerDocs.size >= players.size, '幽霊が抜けていれば残り全員の回答だけで遷移条件が成立する');
+
+    await assertSucceeds(
+      updateDoc(doc(hostDb, `rooms/${LEAVE_ROOM}`), {
+        status: 'PREDICTING',
+        answerCounts: { 'はい': 1, 'いいえ': 1 },
+        phaseStartedAt: new Date(),
+      }),
+    );
+  });
+
+  it('4) 予測フェーズでも同様に、残り2人の予測だけで遷移条件が満たされる', async () => {
+    const preds = { [HOST]: 1, [P2]: 1 };
+    for (const [uid, prediction] of Object.entries(preds)) {
+      const db = testEnv.authenticatedContext(uid).firestore();
+      await assertSucceeds(
+        updateDoc(doc(db, `rooms/${LEAVE_ROOM}/rounds/1_1/answers/${uid}`), {
+          prediction,
+          targetOption: 'はい',
+        }),
+      );
+    }
+
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    const players = await assertSucceeds(getDocs(collection(hostDb, `rooms/${LEAVE_ROOM}/players`)));
+    const answerDocs = await assertSucceeds(
+      getDocs(collection(hostDb, `rooms/${LEAVE_ROOM}/rounds/1_1/answers`)),
+    );
+    const predicted = answerDocs.docs.filter(d => d.data().prediction !== undefined);
+    assert.strictEqual(players.size, 2);
+    assert.ok(predicted.length >= players.size, '幽霊が抜けていれば残り全員の予測だけで確定条件が成立する');
+
+    await assertSucceeds(
+      updateDoc(doc(hostDb, `rooms/${LEAVE_ROOM}`), {
+        status: 'RESULT',
+        roundScores: [{ playerId: HOST, roundScore: 100 }],
+        nextRound: 2,
+      }),
+    );
+  });
+
+  it('5) 退室した参加者は、status=WAITINGの別ルームに再入室できる', async () => {
+    const REJOIN_ROOM = 'REJOINROOM';
+    const hostDb = testEnv.authenticatedContext(HOST).firestore();
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${REJOIN_ROOM}`), {
+        hostName: 'ホスト太郎',
+        hostUid: HOST,
+        status: 'WAITING',
+        currentRound: 0,
+        totalRounds: 5,
+        category: 'ALL',
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(hostDb, `rooms/${REJOIN_ROOM}/players/${HOST}`), { nickname: 'ホスト太郎', isHost: true }),
+    );
+
+    const p3Db = testEnv.authenticatedContext(P3).firestore();
+    // 入室 → 退室 → 再入室 を1セットとして、20回以上繰り返しても
+    // 満員判定（20人）に達しないことを確認する（受け入れ基準）。
+    for (let i = 0; i < 22; i++) {
+      await assertSucceeds(
+        setDoc(doc(p3Db, `rooms/${REJOIN_ROOM}/players/${P3}`), { nickname: P3, isHost: false }),
+      );
+      await assertSucceeds(deleteDoc(doc(p3Db, `rooms/${REJOIN_ROOM}/players/${P3}`)));
+    }
+
+    // 最後に入室した状態で終える
+    await assertSucceeds(
+      setDoc(doc(p3Db, `rooms/${REJOIN_ROOM}/players/${P3}`), { nickname: P3, isHost: false }),
+    );
+    const players = await assertSucceeds(getDocs(collection(hostDb, `rooms/${REJOIN_ROOM}/players`)));
+    assert.strictEqual(players.size, 2, '満員判定に達さず、ホストと再入室した1人だけが残る');
   });
 });

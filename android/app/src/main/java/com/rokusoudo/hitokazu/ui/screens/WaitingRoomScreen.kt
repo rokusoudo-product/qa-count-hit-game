@@ -1,5 +1,6 @@
 package com.rokusoudo.hitokazu.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +19,7 @@ import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 fun WaitingRoomScreen(
     viewModel: GameViewModel,
     onGameStarted: () -> Unit,
+    onLeaveRoom: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -26,6 +28,12 @@ fun WaitingRoomScreen(
         if (uiState.phase == GamePhase.ANSWERING) {
             onGameStarted()
         }
+    }
+
+    // システムバックキーでも「退室する」ボタンと同じ処理を実行する（Issue #33）。
+    BackHandler {
+        viewModel.resetGame()
+        onLeaveRoom()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -109,8 +117,18 @@ fun WaitingRoomScreen(
                     text = "ホストがゲームを開始するまでお待ちください",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(bottom = 24.dp),
+                    modifier = Modifier.padding(bottom = 16.dp),
                 )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    viewModel.resetGame()
+                    onLeaveRoom()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("退室する", fontSize = 14.sp)
             }
         }
     }

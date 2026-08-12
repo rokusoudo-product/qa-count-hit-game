@@ -1,5 +1,6 @@
 package com.rokusoudo.hitokazu.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -20,6 +21,7 @@ import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 fun PredictingScreen(
     viewModel: GameViewModel,
     onResult: () -> Unit,
+    onLeaveRoom: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val question = uiState.currentQuestion
@@ -31,6 +33,12 @@ fun PredictingScreen(
 
     LaunchedEffect(uiState.phase) {
         if (uiState.phase == GamePhase.RESULT || uiState.phase == GamePhase.FINISHED) onResult()
+    }
+
+    // 予測フェーズ中でもシステムバックキーで退室できるようにする（Issue #33）。
+    BackHandler {
+        viewModel.resetGame()
+        onLeaveRoom()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

@@ -82,6 +82,11 @@ class MainActivity : ComponentActivity() {
                                         popUpTo(Routes.HOME)
                                     }
                                 },
+                                onLeaveRoom = {
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
                             )
                         }
                         composable(Routes.QR_SCANNER) {
@@ -98,18 +103,33 @@ class MainActivity : ComponentActivity() {
                                         popUpTo(Routes.HOME)
                                     }
                                 },
+                                onLeaveRoom = {
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
                             )
                         }
                         composable(Routes.ANSWERING) {
                             AnsweringScreen(
                                 viewModel = vm,
                                 onPredicting = { navController.navigate(Routes.PREDICTING) },
+                                onLeaveRoom = {
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
                             )
                         }
                         composable(Routes.PREDICTING) {
                             PredictingScreen(
                                 viewModel = vm,
                                 onResult = { navController.navigate(Routes.RESULT) },
+                                onLeaveRoom = {
+                                    navController.navigate(Routes.HOME) {
+                                        popUpTo(Routes.HOME) { inclusive = true }
+                                    }
+                                },
                             )
                         }
                         composable(Routes.RESULT) {

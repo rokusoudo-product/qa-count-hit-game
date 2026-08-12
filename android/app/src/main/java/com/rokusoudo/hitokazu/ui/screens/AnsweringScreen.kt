@@ -1,5 +1,6 @@
 package com.rokusoudo.hitokazu.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +19,7 @@ import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 fun AnsweringScreen(
     viewModel: GameViewModel,
     onPredicting: () -> Unit,
+    onLeaveRoom: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val question = uiState.currentQuestion
@@ -25,6 +27,14 @@ fun AnsweringScreen(
     // 全員回答完了→予測フェーズへ
     LaunchedEffect(uiState.phase) {
         if (uiState.phase == GamePhase.PREDICTING) onPredicting()
+    }
+
+    // 回答フェーズ中でもシステムバックキーで退室できるようにする（Issue #33）。
+    // ボタンは置かず（誤タップ防止のため）バックキーのみの経路とする。
+    // ホストの場合はresetGame()内のガードでplayersドキュメントは削除されない。
+    BackHandler {
+        viewModel.resetGame()
+        onLeaveRoom()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
