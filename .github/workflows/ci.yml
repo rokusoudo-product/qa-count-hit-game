@@ -143,8 +143,11 @@ jobs:
       - name: Install functions dependencies
         run: pip install -r backend/functions/requirements.txt
 
+      # firebase-tools の最新版（15系）は Firestore Emulator の起動に Java 21+ を要求する。
+      # 他ジョブ（rules-tests）は package.json で ^14.0.0 に固定しているため、
+      # ここでも同じメジャーバージョンに固定して Java 17 のまま動かす（挙動の差異も避ける）。
       - name: Install firebase-tools
-        run: npm install -g firebase-tools
+        run: npm install -g firebase-tools@^14.0.0
 
       # expireAt を過ぎたルームが players/rounds/rounds/*/answers を含めて
       # 再帰削除されること・期限内ルームが削除されないことを検証する（Issue #34）。
