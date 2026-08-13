@@ -1,8 +1,8 @@
 # システムアーキテクチャ概要
 
 **作成日**: 2026-03-20
-**最終更新**: 2026-08-06（実装との乖離を解消。Issue #19）
-**バージョン**: 3.0
+**最終更新**: 2026-08-13（ルーム保持期限・自動削除を追加。Issue #34）
+**バージョン**: 3.1
 
 ---
 
@@ -19,7 +19,9 @@ flowchart TB
         AUTH["Firebase Auth<br/>匿名認証"]
         FS[("Cloud Firestore<br/>rooms/{roomId}/<br/>players・rounds・answers")]
         HOSTING["Firebase Hosting<br/>招待ページ web/public/join/"]
-        FN["Cloud Functions Python 3.12<br/>us-central1"]
+        FN["Cloud Functions (HTTPS)<br/>Python 3.12 / us-central1<br/>create_room 他4関数"]
+        SCHED["Cloud Scheduler<br/>1日1回"]
+        SWEEP["Cloud Functions (Scheduled)<br/>delete_expired_rooms"]
     end
 
     AND -->|匿名サインイン| AUTH
@@ -28,6 +30,8 @@ flowchart TB
     WEB <==>|直接読み書き＋リアルタイム購読| FS
     HOSTING -.->|ルームIDを渡す| AND
     FN -.->|現状クライアントからは未使用| FS
+    SCHED -->|1日1回起動| SWEEP
+    SWEEP -->|expireAt超過ルームを<br/>サブコレクションごと再帰削除| FS
 
     style FN stroke-dasharray: 5 5
 ```
@@ -35,13 +39,16 @@ flowchart TB
 ### 最重要の前提
 
 **ゲームロジックはクライアント側にあり、クライアントは Firestore を直接読み書きする。**
-`backend/functions/main.py` に Cloud Functions が実装済みだが、**Android・Web のどちらからも呼び出していない**（図中の破線）。実装を読む・変更するときはこの前提を誤らないこと。
+`backend/functions/main.py` の HTTPS Cloud Functions 5関数（`create_room` / `join_room` / `start_game` / `submit_answer` / `submit_prediction`）は実装済みだが、**Android・Web のどちらからも呼び出していない**（図中の破線）。実装を読む・変更するときはこの前提を誤らないこと。
+
+一方、同じ `main.py` に定義されている `delete_expired_rooms`（スケジュール実行・Issue #34）は**クライアントを経由せず Cloud Scheduler が直接起動する**ため、上記の「未使用」の対象外。ルーム保持期限を過ぎたデータの削除という、クライアント側では実装しようがない役割を担う（後述「ルームの保持期限と自動削除」）。
 
 この構成の帰結:
 
 - 採点・フェーズ遷移・タイムアウト確定はすべてクライアントが実行する
 - そのためスコア改ざんは Firestore ルールだけでは防ぎきれない（後述「セキュリティ」）
 - 将来ロジックをサーバー側へ移す場合は、既存の Cloud Functions が出発点になる
+- ただし削除処理（`delete_expired_rooms`）だけは例外的にサーバー側（Cloud Functions）で完結しており、クライアントは一切関与しない
 
 ---
 
@@ -53,7 +60,8 @@ flowchart TB
 | 認証 | Firebase Authentication（匿名） | プレイヤー識別（uid） | ✅ 使用中 |
 | ホスティング | Firebase Hosting | 招待ページ `web/public/join/` | ✅ 使用中 |
 | リアルタイム通信 | Firestore リスナー（`addSnapshotListener`） | WebSocket 代替 | ✅ 使用中 |
-| サーバーレス関数 | Cloud Functions (Python 3.12 / us-central1) | ゲームロジック・採点 | ⚠️ **実装済みだが未使用** |
+| サーバーレス関数（HTTPS） | Cloud Functions (Python 3.12 / us-central1) | ゲームロジック・採点 | ⚠️ **実装済みだが未使用** |
+| サーバーレス関数（スケジュール） | Cloud Functions (Python 3.12 / us-central1) + Cloud Scheduler | `delete_expired_rooms`：期限切れルームの自動削除（Issue #34） | ✅ 使用中 |
 
 ---
 
@@ -85,6 +93,7 @@ flowchart TB
 | `startedAt` | timestamp | startGame | ゲーム開始時刻 |
 | `finishedAt` | timestamp | ゲーム終了時 | ゲーム終了時刻 |
 | `restartedAt` | timestamp | restartGame | 再戦を開始した時刻 |
+| `expireAt` | timestamp | createRoom / finalizeRound（各ラウンド確定時） / terminateRoomHostLeft / restartGame | **ルームの保持期限。`delete_expired_rooms`（スケジュール Cloud Function）がこれを過ぎたルームをサブコレクションごと削除する**（Issue #34）。終了済み（FINISHED / HOST_LEFT）は終了時刻から24時間後、それ以外（作成時・ラウンド確定のたび・再戦時）は基準時刻から6時間後に更新される。遊び続けている限り毎ラウンドの確定で延長されるため実質失効しない。詳細は「ルームの保持期限と自動削除」を参照 |
 
 `PlayerScore` の構造: `{ playerId, nickname, targetOption, predictedCount, actualCount, roundScore, totalScore }`
 
@@ -120,9 +129,11 @@ flowchart TB
 
 ---
 
-## Cloud Functions 一覧（現状クライアントからは未使用）
+## Cloud Functions 一覧
 
-`backend/functions/main.py`。HTTPS 関数として `us-central1` にデプロイされる。
+`backend/functions/main.py`。`us-central1` にデプロイされる。
+
+### HTTPS 関数（現状クライアントからは未使用）
 
 | 関数名 | 説明 |
 |--------|------|
@@ -133,6 +144,14 @@ flowchart TB
 | `submit_prediction` | 予測保存・採点・次ラウンド/終了 |
 
 > ⚠️ **これらは現役の API ではない。** クライアントは Firestore を直接読み書きしており、この5関数を呼んでいない。ロジックをサーバー側へ移す判断をした時点で、改めて現行のクライアント実装と突き合わせる必要がある。
+
+### スケジュール関数（使用中）
+
+| 関数名 | トリガー | 説明 |
+|--------|---------|------|
+| `delete_expired_rooms` | Cloud Scheduler（1日1回） | `expireAt` を過ぎたルーム、および `expireAt` 未設定の旧ルーム（`createdAt` から24時間超）を `firestore.recursive_delete()` でサブコレクションごと削除する（Issue #34）。詳細は「ルームの保持期限と自動削除」を参照 |
+
+こちらは HTTPS 関数と異なり Cloud Scheduler が直接起動するため、クライアントの実装状況とは無関係に本番で稼働する。
 
 ---
 
@@ -162,6 +181,56 @@ WAITING（同一ルームで再戦）
   「トップに戻る」（`resetGame`）はルームから離脱してホーム画面に戻るだけで、`FINISHED → WAITING` は起こさない
 
 > ⚠️ ホスト自身が離脱するとタイムアウト確定を実行する主体がいなくなる。この扱いは Issue #15 で対応する（Firestore ハートビートで検知し、ルームを終了する方針で確定済み）。
+
+---
+
+## ルームの保持期限と自動削除（Issue #34）
+
+### 背景
+
+ルーム（`rooms/{roomId}` とその配下の `players` / `rounds` / `rounds/*/answers`）を削除する経路が
+これまで存在せず、Firestore に無期限に蓄積していた。ニックネームを含むデータが際限なく残ることは
+プライバシー上望ましくなく（匿名認証のためユーザー主導の削除経路もない）、Firestore 無料枠の容量
+（Spark プラン1GiB）に対しても単調増加はリスクだった。
+
+### 保持期間の既定値
+
+| 状態 | 保持期間 | 基準時刻 |
+|---|---|---|
+| 終了済み（`FINISHED` / `HOST_LEFT`） | 終了から **24時間** | ゲーム終了時刻 / ホスト離脱検知時刻 |
+| それ以外（作成直後の待合室・ラウンド確定のたび・再戦直後） | 基準時刻から **6時間** | ルーム作成時刻 / 各ラウンド確定時刻 / 再戦開始時刻 |
+
+`expireAt`（Timestamp）フィールドがこの期限を表し、以下の箇所で更新される（Android の
+`FirebaseRepository.kt`・Web の `backend/web/index.html` の両方に同一ロジックを実装）。
+
+- `createRoom()` … 作成時刻 + 6時間
+- `finalizeRound()`（ラウンド確定のたび）… 最終ラウンドなら終了時刻 + 24時間（`FINISHED`）、
+  それ以外は確定時刻 + 6時間（`RESULT`）へ更新。**遊び続けている限り毎ラウンドで延長されるため実質失効しない**
+- `terminateRoomHostLeft()` … ホスト離脱検知時刻 + 24時間（`HOST_LEFT`）
+- `restartGame()` … 再戦開始時刻 + 6時間（`WAITING` に戻るため、待合室と同じ基準を使う）
+
+`expireAt` は Firestore の `serverTimestamp()` のような「1回の書き込みで＋オフセットを表現する」機能が
+ないため、各クライアントの端末クロックから計算する。削除は1日1回のバッチ実行のため、多少のクロック
+ずれは吸収される。
+
+### 削除の仕組み（`delete_expired_rooms`）
+
+Firestore の TTL ポリシーは**親ドキュメントの削除のみを行い、サブコレクション（`players` /
+`rounds` / `rounds/*/answers`）を削除しない**。TTL ポリシー単体では孤児ドキュメントが残ってしまうため、
+`backend/functions/main.py` にスケジュール Cloud Function `delete_expired_rooms`（Cloud Scheduler・
+1日1回）を実装し、Firebase Admin SDK の `firestore.recursive_delete()` でルームとサブコレクションを
+まとめて再帰削除している。
+
+削除対象は2種類:
+
+1. `expireAt` を過ぎたルーム（本Issue以降に作成・更新されたルーム）
+2. `expireAt` を持たない旧ルーム（本Issue導入前に作成され、`createdAt` から24時間を超えているもの）。
+   本Issue導入前に作成されたルームは `expireAt` を持たないため、1のクエリだけでは永久に削除対象に
+   ならない。作成から24時間を超えていれば保持期間の上限（終了系24時間）をすでに超過している
+   という前提で、フォールバックとして削除する
+
+コア処理は `_sweep_expired_rooms(db)`（`backend/functions/main.py`）に切り出してあり、
+`backend/test_room_expiry.py`（Firestore Emulator 統合テスト）から直接 import して検証している。
 
 ---
 
@@ -211,6 +280,9 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 
 ルールのテストは `backend/rules-tests/`（権限マトリクス24件＋実ゲームフロー8件）。
 
+> `delete_expired_rooms`（スケジュール Cloud Function）は Firebase Admin SDK 経由でアクセスするため、
+> 上記のセキュリティルールを経由しない（Admin SDK はルールを迂回する）。クライアントからは呼び出せない。
+
 ---
 
 ## テストと CI
@@ -220,6 +292,7 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 | `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存） | ✅ |
 | `backend/test_questions_sync.py` | 質問マスタの正本と3実装の一致検証 | ✅ |
 | `backend/rules-tests/` | Firestore ルール（Emulator 上で32件） | ✅ |
+| `backend/test_room_expiry.py` | ルーム保持期限・自動削除（`_sweep_expired_rooms`）の Emulator 統合テスト（Issue #34） | ✅ |
 | `backend/test_game_flow.py` | Emulator 統合テスト | — |
 | `backend/test_functions.py` | ⚠️ **本番 Firestore に直接書き込む**。CI に含めない | ❌ |
 

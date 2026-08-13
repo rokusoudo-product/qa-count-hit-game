@@ -72,6 +72,7 @@ hitokazu_game/                    # リポジトリ名は qa-count-hit-game
 │   ├── web/index.html            #   Webクライアント（質問マスタは生成マーカーで自動反映）
 │   ├── test_logic.py             #   ロジック単体（Firestore 非依存）
 │   ├── test_questions_sync.py    #   質問マスタの正本と3実装の同期テスト（Firestore 非依存）
+│   ├── test_room_expiry.py       #   ルーム保持期限・自動削除（delete_expired_rooms）の Emulator 統合テスト（Issue #34）
 │   ├── test_game_flow.py         #   Emulator 統合テスト
 │   └── test_functions.py         #   ⚠️ 本番 Firestore に直接書き込む
 ├── android/                      # エンジニア：Kotlin / Compose
@@ -117,6 +118,10 @@ python3 test_logic.py
 # Emulator 統合テスト（firebase CLI + Java が必要）
 firebase emulators:exec --only firestore,auth \
   "FIRESTORE_EMULATOR_HOST=localhost:8080 python3 test_game_flow.py"
+
+# ルーム保持期限・自動削除の Emulator 統合テスト（Issue #34）
+firebase emulators:exec --project hitokazu-game --only firestore \
+  "FIRESTORE_EMULATOR_HOST=localhost:8080 python3 test_room_expiry.py"
 ```
 
 ⚠️ `test_functions.py` は **本番 Firestore（`hitokazu-game`）に直接書き込む**スクリプト。

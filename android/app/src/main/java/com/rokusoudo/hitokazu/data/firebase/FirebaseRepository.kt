@@ -1,6 +1,7 @@
 package com.rokusoudo.hitokazu.data.firebase
 
 import android.util.Log
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.MetadataChanges
@@ -13,8 +14,21 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
 private const val TAG = "FirebaseRepository"
+
+// ── ルームの保持期限（Issue #34） ────────────────────────
+// 終了済み（FINISHED / HOST_LEFT）は終了から24時間、それ以外（作成直後の待合室・
+// 再戦直後・ラウンド確定のたび）は基準時刻から6時間で expireAt を更新する。
+// ゲームを遊び続けている限り毎ラウンドの確定で6時間ずつ延長されるため実質失効しない。
+// Firestore の serverTimestamp() は1回の書き込みで「+オフセット」を表現できないため、
+// 端末クロックから計算する（削除は1日1回のバッチ実行のため、多少のクロックずれは吸収される）。
+private const val ROOM_WAITING_RETENTION_HOURS = 6L
+private const val ROOM_FINISHED_RETENTION_HOURS = 24L
+
+private fun expireAtAfterHours(hours: Long): Timestamp =
+    Timestamp(Date(System.currentTimeMillis() + hours * 60 * 60 * 1000))
 
 // ── リアルタイム監視の通知イベント ──────────────────────
 // addSnapshotListenerのerrorをUI側へ伝えるため、データ更新とエラーを
@@ -67,6 +81,8 @@ class FirebaseRepository {
                 // 参加者が join した直後からホスト離脱判定の基準を持てるよう、作成時点でも書いておく
                 // （初回の定期ハートビートが届くまでの間、判定対象がnullで判定をスキップされる隙間を埋める）。
                 "hostHeartbeatAt" to FieldValue.serverTimestamp(),
+                // 未開始のまま放置されたルームを削除スケジュール関数が回収するための保持期限（Issue #34）。
+                "expireAt" to expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
             )
         ).await()
 
@@ -315,7 +331,13 @@ class FirebaseRepository {
         val status = roomData["status"] as? String
         if (status == "FINISHED" || status == "HOST_LEFT") return@runCatching
 
-        roomRef.update(mapOf("status" to "HOST_LEFT")).await()
+        roomRef.update(
+            mapOf(
+                "status" to "HOST_LEFT",
+                // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
+                "expireAt" to expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
+            )
+        ).await()
     }
 
     // ── 再戦（同一ルームを再利用してもう一度遊ぶ） ─────────
@@ -345,6 +367,8 @@ class FirebaseRepository {
             "cumulativeTotals" to emptyMap<String, Int>(),
             "nextRound" to FieldValue.delete(),
             "restartedAt" to FieldValue.serverTimestamp(),
+            // WAITING に戻るので保持期限も「未開始のまま放置」の基準（6時間）へ延長する（Issue #34）。
+            "expireAt" to expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
         )
         if (lastQuestionId != null) {
             updates["lastPlayedQuestionId"] = lastQuestionId
@@ -444,6 +468,8 @@ class FirebaseRepository {
                     "finalScores" to sortedByTotal,
                     "cumulativeTotals" to newTotals,
                     "finishedAt" to FieldValue.serverTimestamp(),
+                    // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
+                    "expireAt" to expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
                 )
             ).await()
         } else {
@@ -454,6 +480,8 @@ class FirebaseRepository {
                     "roundScores" to sortedByRound,
                     "cumulativeTotals" to newTotals,
                     "nextRound" to currentRound + 1,
+                    // ラウンド確定のたびに保持期限を延長する。遊び続けている限り実質失効しない（Issue #34）。
+                    "expireAt" to expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
                 )
             ).await()
         }

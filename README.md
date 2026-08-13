@@ -122,6 +122,7 @@ npm --prefix rules-tests run test:emulator
 - `backend/test_logic.py`（採点ロジック単体テスト）
 - `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
 - `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス24件＋実ゲームフロー8件、Firebase Emulator上で実行）
+- `backend/test_room_expiry.py`（ルーム保持期限・自動削除のEmulator統合テスト。詳細は下記「ルームの保持期間と自動削除」）
 - lint（Python: flake8 / JS: rules-tests に設定があれば実行）
 
 テストが1件でも失敗するとCIが失敗（レッド）になり、PR上にステータスとして表示されます。
@@ -201,12 +202,14 @@ Android / ブラウザ
   "gameCount": 1,
   "createdAt": "timestamp",
   "startedAt": "timestamp",
-  "finishedAt": "timestamp"
+  "finishedAt": "timestamp",
+  "expireAt": "timestamp"
 }
 ```
 
 - `hostUid` は Firestore ルールのホスト判定に使います
 - `phaseStartedAt` は**タイムアウト判定の基準となるサーバー時刻**です（下記「ゲームの状態遷移」）
+- `expireAt` は**ルームの保持期限**です（下記「ルームの保持期間と自動削除」）
 - 各フィールドの型・書き込み箇所を含む網羅的な一覧は [docs/architecture.md](docs/architecture.md#firestore-データ構造) にあります。
   実装を変更するときはそちらを正としてください
 
@@ -231,6 +234,32 @@ WAITING → ANSWERING → PREDICTING → RESULT → ANSWERING → ...→ FINISHE
 - `ANSWERING` は `answerSeconds`（既定30秒）＋猶予3秒、`PREDICTING` は `predictSeconds`（既定20秒）＋猶予3秒が経過すると、**ホスト端末が提出済みの分だけで確定**させて次のフェーズへ進めます
 - 判定の基準時刻は端末のローカル時計ではなく、ルームドキュメントの `phaseStartedAt`（サーバー時刻）から算出します。途中参加・画面復帰した端末でも基準がズレません
 - 未提出者は当該ラウンドのスコア集計から除外されます
+
+---
+
+## ルームの保持期間と自動削除
+
+ルームとその配下のデータ（`players` / `rounds` / `rounds/*/answers`。ニックネームを含む）は、
+Firestore にため込まれ続けないよう**保持期限を過ぎると自動的に削除**されます（Issue #34）。
+
+| 状態 | 保持期間 |
+|---|---|
+| 終了済み（`FINISHED` / `HOST_LEFT`） | 終了から **24時間** |
+| それ以外（待合室・ラウンド確定のたび・再戦直後） | 基準時刻から **6時間** |
+
+- ルームドキュメントの `expireAt` フィールドがこの期限を表し、ルーム作成・各ラウンド確定・
+  ホスト離脱検知・再戦のたびに更新されます。**遊び続けている限り毎ラウンドの確定で延長されるため
+  実質失効しません**
+- 削除は1日1回のスケジュール Cloud Function `delete_expired_rooms`（`backend/functions/main.py`）が行います。
+  Firestore の TTL ポリシーは親ドキュメントの削除だけでサブコレクションを削除しないため、
+  Firebase Admin SDK の `firestore.recursive_delete()` で `players` / `rounds` / `rounds/*/answers` を
+  含めて再帰的に削除します
+- `expireAt` を持たない旧ルーム（本Issue導入前に作成された分）は、`createdAt` から24時間を超えていれば
+  フォールバックとして削除対象になります
+- 初回デプロイ時はスケジュール関数のデプロイと同時に Cloud Scheduler ジョブが自動作成されます：
+  `cd backend && firebase deploy --only functions`
+- 検証は `backend/test_room_expiry.py`（Firestore Emulator）で行っています。詳細は
+  [docs/architecture.md](docs/architecture.md#ルームの保持期限と自動削除issue-34) を参照
 
 ---
 
@@ -292,6 +321,15 @@ firebase deploy --only hosting
 cd backend
 firebase deploy --only firestore:rules
 ```
+
+### Cloud Functions
+
+```bash
+cd backend
+firebase deploy --only functions
+```
+
+スケジュール関数（`delete_expired_rooms`）を含む。初回デプロイ時に Cloud Scheduler ジョブが自動作成される（Blaze プラン必須）。
 
 ---
 
