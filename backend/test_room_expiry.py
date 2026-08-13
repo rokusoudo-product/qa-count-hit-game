@@ -31,9 +31,16 @@ sys.path.insert(0, "functions/venv/lib/python3.12/site-packages")
 sys.path.insert(0, "functions")
 
 import main  # noqa: E402  (sys.path 設定後に import する必要があるため)
-from firebase_admin import firestore  # noqa: E402
+from google.cloud import firestore as gcloud_firestore  # noqa: E402
 
-db = firestore.client()
+# ⚠️ firebase_admin.firestore.client() は使わない。
+# firebase_admin 経由のクライアントは Firestore Emulator 相手でも
+# App.credential.get_credential() で実際の Google Application Default Credentials（ADC）解決を
+# 試みてしまい、ADC が存在しない環境（CI ランナー等）では
+# google.auth.exceptions.DefaultCredentialsError で落ちる（ローカルの開発機だけ ADC が
+# 設定済みで気づきにくい）。google.cloud.firestore.Client() は FIRESTORE_EMULATOR_HOST が
+# 設定されていれば AnonymousCredentials を自動的に使うため、ADC なしで動く。
+db = gcloud_firestore.Client(project=os.environ["GOOGLE_CLOUD_PROJECT"])
 
 PASS = "✅"
 FAIL = "❌"
