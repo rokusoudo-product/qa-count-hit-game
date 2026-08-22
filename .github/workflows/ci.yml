@@ -107,3 +107,52 @@ jobs:
       # rules.test.mjs（権限マトリクス24件）+ gameflow.test.mjs（実ゲームフロー8件）= 32件
       - name: Run Firestore rules tests (emulator)
         run: npm --prefix backend/rules-tests run test:emulator
+
+  room-expiry-tests:
+    name: ルーム保持期限・自動削除テスト（Emulator）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # backend/functions/main.py（delete_expired_rooms が呼ぶ recursive_delete 等）を
+      # test_room_expiry.py から直接importして検証するため、functions/ の依存を
+      # システムのPython 3.12 側にインストールする（backend/functions/venv には依存しない）。
+      - name: Install functions dependencies
+        run: pip install -r backend/functions/requirements.txt
+
+      # firebase-tools の最新版（15系）は Firestore Emulator の起動に Java 21+ を要求する。
+      # 他ジョブ（rules-tests）は package.json で ^14.0.0 に固定しているため、
+      # ここでも同じメジャーバージョンに固定して Java 17 のまま動かす（挙動の差異も避ける）。
+      - name: Install firebase-tools
+        run: npm install -g firebase-tools@^14.0.0
+
+      # expireAt を過ぎたルームが players/rounds/rounds/*/answers を含めて
+      # 再帰削除されること・期限内ルームが削除されないことを検証する（Issue #34）。
+      - name: Run room expiry tests (emulator)
+        run: |
+          cd backend
+          firebase emulators:exec --project hitokazu-game --only firestore \
+            "FIRESTORE_EMULATOR_HOST=localhost:8080 python3 test_room_expiry.py"

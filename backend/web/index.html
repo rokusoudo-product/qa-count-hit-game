@@ -213,6 +213,19 @@
   const HOST_HEARTBEAT_INTERVAL_SECONDS = 15;
   const HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECONDS * 3;
 
+  // ── ルームの保持期限（Issue #34） ────────────────────────
+  // 終了済み（FINISHED / HOST_LEFT）は終了から24時間、それ以外（作成直後の待合室・
+  // 再戦直後・ラウンド確定のたび）は基準時刻から6時間で expireAt を更新する。
+  // ゲームを遊び続けている限り毎ラウンドの確定で6時間ずつ延長されるため実質失効しない。
+  // Firestore の serverTimestamp() は1回の書き込みで「+オフセット」を表現できないため、
+  // 端末クロックから計算する（削除は1日1回のバッチ実行のため、多少のクロックずれは吸収される）。
+  const ROOM_WAITING_RETENTION_HOURS = 6;
+  const ROOM_FINISHED_RETENTION_HOURS = 24;
+
+  function expireAtAfterHours(hours) {
+    return new Date(Date.now() + hours * 60 * 60 * 1000);
+  }
+
   let state = {
     uid: null,
     roomId: null,
@@ -294,6 +307,8 @@
       // 再戦（restartGame）ごとにインクリメントする世代番号。
       // rounds/{gameCount}_{round} のドキュメントIDに使い、前ゲームの回答と衝突させない（Issue #17）。
       gameCount: 1,
+      // 未開始のまま放置されたルームを削除スケジュール関数が回収するための保持期限（Issue #34）。
+      expireAt: expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
     });
     await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
       nickname: hostName, isHost: true, joinedAt: serverTimestamp(),
@@ -376,7 +391,11 @@
     if (!roomSnap.exists()) return;
     const status = roomSnap.data().status;
     if (status === 'FINISHED' || status === 'HOST_LEFT') return;
-    await updateDoc(roomRef, { status: 'HOST_LEFT' });
+    // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
+    await updateDoc(roomRef, {
+      status: 'HOST_LEFT',
+      expireAt: expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
+    });
   }
 
   // ── ホスト離脱監視をスケジュール（参加者のみ） ────────────
@@ -789,9 +808,17 @@
 
     const isLast = currentRound >= totalRounds;
     if (isLast) {
-      await updateDoc(roomRef, { status: 'FINISHED', finalScores: scores, finishedAt: serverTimestamp() });
+      // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
+      await updateDoc(roomRef, {
+        status: 'FINISHED', finalScores: scores, finishedAt: serverTimestamp(),
+        expireAt: expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
+      });
     } else {
-      await updateDoc(roomRef, { status: 'RESULT', roundScores: scores, nextRound: currentRound + 1 });
+      // ラウンド確定のたびに保持期限を延長する。遊び続けている限り実質失効しない（Issue #34）。
+      await updateDoc(roomRef, {
+        status: 'RESULT', roundScores: scores, nextRound: currentRound + 1,
+        expireAt: expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
+      });
     }
   }
 
@@ -898,6 +925,8 @@
       nextRound: deleteField(),
       restartedAt: serverTimestamp(),
       lastPlayedQuestionId: lastQuestionId || deleteField(),
+      // WAITING に戻るので保持期限も「未開始のまま放置」の基準（6時間）へ延長する（Issue #34）。
+      expireAt: expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
     });
   }
 

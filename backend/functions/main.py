@@ -4,10 +4,11 @@
 import json
 import random
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from firebase_admin import initialize_app, firestore as firebase_firestore
-from firebase_functions import https_fn, options
+from firebase_functions import https_fn, options, scheduler_fn
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 initialize_app()
 
@@ -15,6 +16,20 @@ REGION = options.SupportedRegion.US_CENTRAL1
 CORS = options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"])
 
 TOTAL_ROUNDS_PER_GAME = 5
+
+# ── ルームの保持期限（Issue #34） ─────────────────────────────
+# 終了済み（FINISHED / HOST_LEFT）は終了から24時間、それ以外（作成直後・ラウンド確定の
+# たび）は基準時刻から6時間で expireAt を更新する。Android（FirebaseRepository.kt）・
+# Web（backend/web/index.html）と同一の値にすること。
+ROOM_WAITING_RETENTION_HOURS = 6
+ROOM_FINISHED_RETENTION_HOURS = 24
+# expireAt を持たない旧ルーム（本Issue導入前に作成された分）のフォールバック保持期間。
+ROOM_LEGACY_MAX_AGE_HOURS = 24
+
+
+def _expire_at_after_hours(hours: int, now: datetime | None = None) -> datetime:
+    return (now or datetime.now(timezone.utc)) + timedelta(hours=hours)
+
 
 # 質問マスタは shared/questions.json を正本として生成される（Issue #16）。
 # 直接編集せず、shared/questions.json を更新して
@@ -65,6 +80,7 @@ def create_room(req: https_fn.Request) -> https_fn.Response:
     db = firebase_firestore.client()
     room_id = str(uuid.uuid4())[:8].upper()
 
+    now = datetime.now(timezone.utc)
     db.collection("rooms").document(room_id).set({
         "hostName": host_name,
         "status": "WAITING",
@@ -72,7 +88,9 @@ def create_room(req: https_fn.Request) -> https_fn.Response:
         "totalRounds": len(QUESTIONS),
         "currentQuestion": None,
         "category": category,
-        "createdAt": datetime.now(timezone.utc),
+        "createdAt": now,
+        # 未開始のまま放置されたルームを delete_expired_rooms が回収するための保持期限。
+        "expireAt": _expire_at_after_hours(ROOM_WAITING_RETENTION_HOURS, now),
     })
 
     return _ok({"roomId": room_id})
@@ -281,12 +299,15 @@ def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
 
     scores.sort(key=lambda x: x["roundScore"], reverse=True)
     is_last = current_round >= total_rounds
+    now = datetime.now(timezone.utc)
 
     if is_last:
         room_ref.update({
             "status": "FINISHED",
             "finalScores": scores,
-            "finishedAt": datetime.now(timezone.utc),
+            "finishedAt": now,
+            # 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
+            "expireAt": _expire_at_after_hours(ROOM_FINISHED_RETENTION_HOURS, now),
         })
     else:
         next_round = current_round + 1
@@ -296,6 +317,8 @@ def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
             "status": "RESULT",
             "roundScores": scores,
             "nextRound": next_round,
+            # ラウンド確定のたびに保持期限を延長する。遊び続けている限り実質失効しない（Issue #34）。
+            "expireAt": _expire_at_after_hours(ROOM_WAITING_RETENTION_HOURS, now),
         })
         import time
         time.sleep(10)
@@ -304,3 +327,42 @@ def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
             "currentRound": next_round,
             "currentQuestion": next_question,
         })
+
+
+# ── 期限切れルームの削除（スケジュール実行） ────────────────────
+# rooms/{roomId} と配下の players / rounds / rounds/*/answers をまとめて削除する（Issue #34）。
+# Firestore の TTL ポリシーは親ドキュメントの削除のみで、サブコレクションを削除しないため
+# （公式ドキュメントに明記された既知の制約）、recursive_delete() で明示的に再帰削除する。
+#
+# 削除対象は2種類:
+#   1. expireAt を過ぎたルーム（本Issue以降に作成・更新されたルーム）
+#   2. expireAt を持たない旧ルーム（本Issue導入前に作成され、まだ一度も
+#      createRoom/finalizeRound/restartGame/terminateRoomHostLeft を経ていないもの）で、
+#      createdAt から ROOM_LEGACY_MAX_AGE_HOURS を超えているもの。
+#      expireAt が付いたルームは1のクエリで扱われるため、ここでは明示的にスキップする。
+def _sweep_expired_rooms(db) -> int:
+    now = datetime.now(timezone.utc)
+    deleted = 0
+
+    expired_rooms = db.collection("rooms").where(filter=FieldFilter("expireAt", "<=", now)).stream()
+    for room_doc in expired_rooms:
+        db.recursive_delete(room_doc.reference)
+        deleted += 1
+
+    legacy_cutoff = now - timedelta(hours=ROOM_LEGACY_MAX_AGE_HOURS)
+    legacy_candidates = db.collection("rooms").where(filter=FieldFilter("createdAt", "<=", legacy_cutoff)).stream()
+    for room_doc in legacy_candidates:
+        data = room_doc.to_dict() or {}
+        if "expireAt" in data:
+            continue  # 上のクエリですでに扱い済み（期限内 or 削除済み）
+        db.recursive_delete(room_doc.reference)
+        deleted += 1
+
+    return deleted
+
+
+@scheduler_fn.on_schedule(schedule="every 24 hours", region=REGION)
+def delete_expired_rooms(event: scheduler_fn.ScheduledEvent) -> None:
+    db = firebase_firestore.client()
+    deleted = _sweep_expired_rooms(db)
+    print(f"delete_expired_rooms: {deleted} 件のルームを削除しました")
