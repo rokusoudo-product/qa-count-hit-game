@@ -161,6 +161,62 @@ describe('rooms/{roomId}/players — 参加者', () => {
   });
 });
 
+// Issue #36: nickname の型・長さ検証（保存型XSS対策の入口塞ぎ）。
+// Web/Androidクライアントのmaxlength=20と揃え、21文字以上・非string・空文字を拒否する。
+describe('rooms/{roomId}/players/{playerId} — nicknameの検証', () => {
+  const NICK_20 = 'あ'.repeat(20); // 上限ちょうど20文字は許可
+  const NICK_21 = 'あ'.repeat(21); // 21文字は拒否
+
+  it('20文字ちょうどのnicknameで入室できる', async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, `rooms/${ROOM}/players/${OUTSIDER}`), { nickname: NICK_20, isHost: false }),
+    );
+  });
+
+  it('21文字以上のnicknameでは入室できない', async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER).firestore();
+    await assertFails(
+      setDoc(doc(db, `rooms/${ROOM}/players/${OUTSIDER}`), { nickname: NICK_21, isHost: false }),
+    );
+  });
+
+  it('空文字のnicknameでは入室できない', async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER).firestore();
+    await assertFails(
+      setDoc(doc(db, `rooms/${ROOM}/players/${OUTSIDER}`), { nickname: '', isHost: false }),
+    );
+  });
+
+  it('非string（数値）のnicknameでは入室できない', async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER).firestore();
+    await assertFails(
+      setDoc(doc(db, `rooms/${ROOM}/players/${OUTSIDER}`), { nickname: 12345, isHost: false }),
+    );
+  });
+
+  it('nicknameフィールドが無い場合は入室できない', async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER).firestore();
+    await assertFails(
+      setDoc(doc(db, `rooms/${ROOM}/players/${OUTSIDER}`), { isHost: false }),
+    );
+  });
+
+  it('自分のnicknameを21文字以上に更新できない', async () => {
+    const db = testEnv.authenticatedContext(PLAYER).firestore();
+    await assertFails(
+      updateDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`), { nickname: NICK_21 }),
+    );
+  });
+
+  it('自分のnicknameを20文字以内に更新できる', async () => {
+    const db = testEnv.authenticatedContext(PLAYER).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, `rooms/${ROOM}/players/${PLAYER}`), { nickname: 'アリス改' }),
+    );
+  });
+});
+
 describe('rooms/{roomId}/rounds/{n}/answers — 回答・予測', () => {
   it('参加者は回答を読める', async () => {
     const db = testEnv.authenticatedContext(PLAYER).firestore();

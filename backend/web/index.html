@@ -279,6 +279,18 @@
     document.getElementById(id).style.display = 'none';
   }
 
+  // Firestore の nickname 等、ユーザー入力由来の文字列を innerHTML に埋め込む前に
+  // 必ず通す。他プレイヤーが書き込んだ nickname は信頼できない入力のため、
+  // HTML として解釈されないようエスケープする（保存型XSS対策）。
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function generateRoomId() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     return Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -434,9 +446,18 @@
       snap => {
         const players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         const list = document.getElementById('player-list');
-        list.innerHTML = players.map(p =>
-          `<li>${p.nickname}${p.isHost ? '<span class="badge">ホスト</span>' : ''}</li>`
-        ).join('');
+        list.innerHTML = '';
+        players.forEach(p => {
+          const li = document.createElement('li');
+          li.appendChild(document.createTextNode(p.nickname));
+          if (p.isHost) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = 'ホスト';
+            li.appendChild(badge);
+          }
+          list.appendChild(li);
+        });
         if (state.isHost) {
           const msg = document.getElementById('player-count-msg');
           msg.textContent = `参加者 ${players.length}人`;
@@ -866,7 +887,7 @@
 
     document.getElementById('result-scores').innerHTML = scores.map((s, i) => {
       const isMe = s.playerId === state.uid;
-      const name = (s.nickname || s.playerId) + (isMe ? '（あなた）' : '');
+      const name = escapeHtml((s.nickname || s.playerId) + (isMe ? '（あなた）' : ''));
       return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
         <span>${name}</span>
@@ -881,7 +902,7 @@
     const scores = data.finalScores || [];
     document.getElementById('final-scores').innerHTML = scores.map((s, i) => {
       const isMe = s.playerId === state.uid;
-      const name = (s.nickname || s.playerId) + (isMe ? '（あなた）' : '');
+      const name = escapeHtml((s.nickname || s.playerId) + (isMe ? '（あなた）' : ''));
       return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
         <span>${name}</span>

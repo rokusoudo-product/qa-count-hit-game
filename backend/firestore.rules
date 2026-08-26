@@ -53,9 +53,16 @@ service cloud.firestore {
       match /players/{playerId} {
         allow read: if isPlayer(roomId);
 
-        // 自分のプレイヤー情報のみ作成・更新できる（なりすまし防止）
+        // 自分のプレイヤー情報のみ作成・更新できる（なりすまし防止）。
+        // nickname は string かつ 1〜20 文字であることも検証する
+        // （Web/Android クライアントの maxlength=20 と揃える。
+        //   クライアントの入力制限だけでは DevTools 等から迂回できるため、
+        //   ルール層でも同じ上限を強制する）
         allow create, update: if request.auth != null
-                              && playerId == request.auth.uid;
+                              && playerId == request.auth.uid
+                              && request.resource.data.nickname is string
+                              && request.resource.data.nickname.size() >= 1
+                              && request.resource.data.nickname.size() <= 20;
 
         // 自分の離脱、またはホストによる参加者削除
         allow delete: if (request.auth != null && playerId == request.auth.uid)
