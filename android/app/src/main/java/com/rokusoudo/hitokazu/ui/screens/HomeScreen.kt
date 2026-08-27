@@ -34,6 +34,11 @@ fun HomeScreen(
     var joinRoomId by remember { mutableStateOf("") }
     var joinNickname by remember { mutableStateOf("") }
 
+    // ニックネームの文字数上限。Web版の maxlength="20" と、Firestoreルール側の
+    // nickname.size() <= 20 検証に合わせる（Issue #36）。
+    // 上限を揃えないと「入力はできるのに保存で弾かれる」事故になるため統一する。
+    val nicknameMaxLength = 20
+
     // ルーム作成成功→QR画面へ
     LaunchedEffect(uiState.roomId, uiState.isHost) {
         if (uiState.roomId.isNotEmpty() && uiState.isHost) {
@@ -127,7 +132,7 @@ fun HomeScreen(
                 Column {
                     OutlinedTextField(
                         value = hostName,
-                        onValueChange = { hostName = it },
+                        onValueChange = { if (it.length <= nicknameMaxLength) hostName = it },
                         label = { Text("あなたの名前") },
                         singleLine = true,
                     )
@@ -196,7 +201,7 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = joinNickname,
-                        onValueChange = { joinNickname = it },
+                        onValueChange = { if (it.length <= nicknameMaxLength) joinNickname = it },
                         label = { Text("ニックネーム") },
                         singleLine = true,
                     )

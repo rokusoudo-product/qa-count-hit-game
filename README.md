@@ -96,16 +96,18 @@ flowchart TB
 | パス | read | create | update | delete |
 |---|---|---|---|---|
 | `rooms/{roomId}` | 認証済み | `hostUid == 自分` | 参加者 | ホスト |
-| `players/{uid}` | 参加者 | 自分のみ | 自分のみ | 自分 or ホスト |
+| `players/{uid}` | 参加者 | 自分のみ・nickname検証 | 自分のみ・nickname検証 | 自分 or ホスト |
 | `rounds/{n}/answers/{uid}` | 参加者 | 参加者かつ自分 | 参加者※ | ホスト |
 
 ルーム本体の read だけ認証済みに開放しているのは、`joinRoom()` が入室前に存在確認・満員判定でルームを読む必要があるためです。配下の `players` / `rounds` は参加者以外に読ませません。
 
+**nickname の検証**: `players/{uid}` の `create` / `update` では、`nickname` が **string かつ 1〜20文字**であることをルール層で検証しています（Web の `maxlength="20"` / Android の入力上限と統一）。クライアントの表示制限だけでは DevTools 等から迂回できるため、不正な値（非文字列・21文字以上・空文字）の保存自体を Firestore 側で拒否します。あわせて Web クライアント側でも、ニックネームを画面に描画する3箇所（待合室のプレイヤー一覧・ラウンド結果ランキング・最終結果ランキング）で `innerHTML` へのエスケープなし埋め込みをやめ、`escapeHtml()` によるエスケープまたは `textContent` ベースの構築に変更し、保存型XSSを防いでいます（Issue #36）。
+
 > ⚠️ **※ スコア改ざんは防ぎきれていません。** 採点はクライアントが実行し、実行者は「最後に予測を送信したプレイヤー」でホストとは限りません（`finalizeRound`）。この処理が他プレイヤーの `roundScore` を書くため、`answers` の update を自分のドキュメントに限定できず、**同一ルームの参加者による改ざんはルール層では防げません**。
 >
-> 無関係な第三者による覗き見・妨害は塞げています。根本的に塞ぐにはゲームロジックを Cloud Functions 側へ移す必要があり、Google Play 公開を本格的に狙う段階で再検討する想定です。
+> 無関係な第三者による覗き見・妨害、および参加者によるニックネーム経由の XSS は塞げています。スコア改ざんを根本的に塞ぐにはゲームロジックを Cloud Functions 側へ移す必要があり、Google Play 公開を本格的に狙う段階で再検討する想定です。
 
-ルールのテストは `backend/rules-tests/` にあります（権限マトリクス24件＋実ゲームフロー8件）。
+ルールのテストは `backend/rules-tests/` にあります（権限マトリクス32件〔nicknameの検証7件を含む〕＋実ゲームフロー18件）。
 
 ```bash
 cd backend
@@ -121,7 +123,7 @@ npm --prefix rules-tests run test:emulator
 
 - `backend/test_logic.py`（採点ロジック単体テスト）
 - `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
-- `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス24件＋実ゲームフロー8件、Firebase Emulator上で実行）
+- `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス32件〔nicknameの検証7件を含む〕＋実ゲームフロー18件、Firebase Emulator上で実行）
 - `backend/test_room_expiry.py`（ルーム保持期限・自動削除のEmulator統合テスト。詳細は下記「ルームの保持期間と自動削除」）
 - lint（Python: flake8 / JS: rules-tests に設定があれば実行）
 
