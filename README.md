@@ -359,38 +359,34 @@ firebase deploy --only functions
 
 ## AI自動修正ワークフロー
 
-GitHubのissueに問題を報告すると、Claude AIが自動でコードを修正してPRを作成します。
+GitHubのissueに `ready` ラベルが付くと、po_agent（Sonnetサブエージェント）が自動で実装してPRを作成します。
+
+> 過去バージョンでは `issue_comment` イベントをトリガーに `.github/workflows/claude-fix.yml` が
+> コメント投稿者の権限を確認せず `contents: write` 等の権限で自律エージェントを起動していたため、
+> 本リポジトリがpublicである以上、第三者がissueコメント一つでシークレット窃取やmainへの任意コミットを
+> 引き起こせる状態でした。このワークフローは廃止し、実装の起動は代表によるラベル付け（`ready`）を
+> 起点とする下記フローに置き換えています。
 
 ### ワークフロー図
 
 ```
-開発者
+代表
   │
-  │ 1. issueを作成（バグ報告・改善要望）
+  │ 1. issueを確認し、実装OKなら ready ラベルを付与
   ▼
-GitHub Issues
+GitHub Issues（ready あり・question / future なし）
   │
-  │ 2. コメントに /fix と投稿
+  │ 2. 毎日午前3時: スケジュールタスク po-agent-daily-issue-check
   ▼
-GitHub Actions
+po_agent（Sonnetサブエージェント）
   │
-  ├── 3. リポジトリをチェックアウト
+  ├── 3. 対象issueを最大3件選定
   │
-  ├── 4. Claude Code CLI を起動
-  │         │
-  │         │  ANTHROPIC_API_KEY
-  │         ▼
-  │     Anthropic API（Claude Sonnet）
-  │         │
-  │         │ issueの内容を読んでコードを修正
-  │         ▼
-  │     修正済みコード
+  ├── 4. issueごとにブランチを作成し実装
   │
-  ├── 5. 新しいブランチにコミット＆プッシュ
-  │
-  └── 6. Pull Requestを自動作成
+  └── 5. Pull Requestを作成（本文に Closes #<番号> を記載）
             │
-            │ 7. 開発者がレビュー＆マージ
+            │ 6. 代表がレビュー＆マージを判断（自動マージはしない）
             ▼
           main ブランチに反映
 ```
@@ -414,19 +410,13 @@ Firebase UIDのハッシュ値が表示されている。
 入室時に入力したニックネームが表示される。
 ```
 
-**2. `/fix` とコメントする**
+**2. 代表が `ready` ラベルを付ける**
 
-issueのコメント欄に以下を投稿するだけです。
-
-```
-/fix
-```
+未解決の質問（`question` ラベル）がなく、実装を保留する理由（`future` ラベル）もない場合に、
+代表がissueに `ready` ラベルを付けます。これが実装開始の合図です。
 
 **3. PRが自動作成される**
 
-数分後にClaudeが修正コードを含むPRを自動作成します。
-内容を確認してmainブランチにマージしてください。
-
-### ワークフロー設定ファイル
-
-`.github/workflows/claude-fix.yml`
+毎日午前3時のスケジュールタスクがpo_agentに委譲し、`ready` かつ `question`/`future` なしのissueを
+最大3件実装してPRを作成します。PR本文には対象issueへの `Closes #<番号>` が記載されます。
+マージは代表が内容を確認したうえで行います（自動マージはしません）。
