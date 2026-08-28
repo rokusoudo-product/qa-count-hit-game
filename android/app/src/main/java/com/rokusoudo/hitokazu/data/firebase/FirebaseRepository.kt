@@ -10,6 +10,7 @@ import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.rokusoudo.hitokazu.data.model.*
 import com.rokusoudo.hitokazu.data.questions.QUESTIONS
+import com.rokusoudo.hitokazu.game.GameLogic
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -438,8 +439,8 @@ class FirebaseRepository {
             val targetOption = data["targetOption"] as? String ?: return@mapNotNull null
             val actual = counts[targetOption] ?: 0
             val predicted = (data["prediction"] as? Long)?.toInt() ?: 0
-            val roundScore = calculateScore(actual, predicted)
-            val totalScore = (prevTotals[doc.id] ?: 0) + roundScore
+            val roundScore = GameLogic.calculateScore(actual, predicted)
+            val totalScore = GameLogic.cumulativeTotal(prevTotals[doc.id] ?: 0, roundScore)
 
             doc.reference.update(mapOf("roundScore" to roundScore, "totalScore" to totalScore))
 
@@ -540,11 +541,8 @@ class FirebaseRepository {
     }
 }
 
-private fun calculateScore(actual: Int, predicted: Int): Int =
-    maxOf(0, 100 - kotlin.math.abs(predicted - actual) * 20)
-
-// rounds サブコレクションのドキュメントID。gameCount を含めることで、restartGame() 後の
-// 2ゲーム目が前ゲームの rounds/{round}/answers と衝突しないようにする（Issue #17）。
-private fun roundDocId(gameCount: Long, round: Int): String = "${gameCount}_${round}"
+// 採点・ドキュメントID採番ロジックは com.rokusoudo.hitokazu.game.GameLogic に切り出し済み
+// （Issue #29: Firestoreに依存しない純粋関数としてユニットテスト可能にするため）。
+private fun roundDocId(gameCount: Long, round: Int): String = GameLogic.roundDocId(gameCount, round)
 
 private const val TOTAL_ROUNDS_PER_GAME = 5

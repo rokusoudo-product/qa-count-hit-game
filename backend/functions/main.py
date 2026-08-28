@@ -10,6 +10,8 @@ from firebase_admin import initialize_app, firestore as firebase_firestore
 from firebase_functions import https_fn, options, scheduler_fn
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+import game_logic
+
 initialize_app()
 
 REGION = options.SupportedRegion.US_CENTRAL1
@@ -64,10 +66,6 @@ def _ok(data: dict):
 
 def _err(message: str, status: int = 400):
     return https_fn.Response(json.dumps({"error": message}), status=status, content_type="application/json")
-
-
-def _calculate_score(actual: int, predicted: int) -> int:
-    return max(0, 100 - abs(predicted - actual) * 20)
 
 
 # ── ルーム作成 ─────────────────────────────────────────────────
@@ -209,13 +207,11 @@ def submit_answer(req: https_fn.Request) -> https_fn.Response:
         .get()
     )
 
-    if len(answers) >= len(players):
+    if game_logic.should_transition_to_predicting(len(answers), len(players)):
         question = room_data.get("currentQuestion", {})
-        counts = {opt: 0 for opt in question.get("options", [])}
-        for a in answers:
-            opt = a.to_dict().get("answer")
-            if opt in counts:
-                counts[opt] += 1
+        options_list = question.get("options", [])
+        answer_values = [a.to_dict().get("answer") for a in answers]
+        counts = game_logic.count_answers(answer_values, options_list)
         room_ref.update({"status": "PREDICTING", "answerCounts": counts})
 
     return _ok({"message": "ok"})
@@ -268,37 +264,35 @@ def submit_prediction(req: https_fn.Request) -> https_fn.Response:
     )
 
     predicted_players = [a for a in answers if "prediction" in a.to_dict()]
-    if len(predicted_players) >= len(players):
+    if game_logic.should_finalize_round(len(predicted_players), len(players)):
         _finalize_round(room_ref, room_data, current_round, answers)
 
     return _ok({"message": "ok"})
 
 
 def _finalize_round(room_ref, room_data: dict, current_round: int, answers):
-    question = room_data.get("currentQuestion", {})
     counts = room_data.get("answerCounts", {})
     total_rounds = room_data.get("totalRounds", TOTAL_ROUNDS_PER_GAME)
 
-    scores = []
+    predictions = []
     for a_doc in answers:
         a = a_doc.to_dict()
         if "prediction" not in a:
             continue
-        actual = counts.get(a.get("targetOption", ""), 0)
-        score = _calculate_score(actual, int(a["prediction"]))
-        room_ref.collection("rounds").document(str(current_round)).collection("answers").document(a_doc.id).update({
-            "roundScore": score,
-        })
-        scores.append({
+        predictions.append({
             "playerId": a_doc.id,
-            "targetOption": a.get("targetOption"),
+            "targetOption": a.get("targetOption", ""),
             "predictedCount": int(a["prediction"]),
-            "actualCount": actual,
-            "roundScore": score,
         })
 
-    scores.sort(key=lambda x: x["roundScore"], reverse=True)
-    is_last = current_round >= total_rounds
+    scores = game_logic.finalize_scores(predictions, counts)
+
+    for s in scores:
+        room_ref.collection("rounds").document(str(current_round)).collection("answers").document(
+            s["playerId"]
+        ).update({"roundScore": s["roundScore"]})
+
+    is_last = game_logic.get_next_status(current_round, total_rounds) == "FINISHED"
     now = datetime.now(timezone.utc)
 
     if is_last:

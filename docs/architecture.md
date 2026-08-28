@@ -241,7 +241,7 @@ Firestore の TTL ポリシーは**親ドキュメントの削除のみを行い
 スコア = max(0, 100 - 差分 × 20)
 ```
 
-ぴったり当てると100点、1人ずれるごとに20点減点。実装は `FirebaseRepository` と `backend/test_logic.py` にある。
+ぴったり当てると100点、1人ずれるごとに20点減点。実装は `android/.../game/GameLogic.kt`（Android。実際に出荷される実装）・`backend/functions/game_logic.py`（Python。Cloud Functions・`backend/test_logic.py` が直接importして検証）・`backend/web/index.html`（Web）にある（Issue #29。以前は `backend/test_logic.py` がテストファイル内で採点式を自前に再実装しており、CIが検証していたのは出荷されないコピーだった）。
 
 ---
 
@@ -289,7 +289,9 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 
 | ファイル | 内容 | CI |
 |---|---|---|
-| `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存） | ✅ |
+| `android/app/src/test/.../game/GameLogicTest.kt` | Android採点・累計スコアロジック単体（`./gradlew testDebugUnitTest`。Issue #29） | ✅ |
+| `android/`（`./gradlew assembleDebug`） | Androidアプリのビルド（Kotlinのコンパイルエラー検知。Issue #29） | ✅ |
+| `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存。`backend/functions/game_logic.py` を直接import） | ✅ |
 | `backend/test_questions_sync.py` | 質問マスタの正本と3実装の一致検証 | ✅ |
 | `backend/rules-tests/` | Firestore ルール（Emulator 上で32件） | ✅ |
 | `backend/test_room_expiry.py` | ルーム保持期限・自動削除（`_sweep_expired_rooms`）の Emulator 統合テスト（Issue #34） | ✅ |

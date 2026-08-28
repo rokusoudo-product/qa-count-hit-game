@@ -62,4 +62,7 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.okhttp)
     debugImplementation(libs.androidx.ui.tooling)
+
+    // JVM上で動くユニットテスト（Firestoreに依存しない純粋関数のみ対象。Issue #29）
+    testImplementation(libs.junit)
 }
