@@ -18,6 +18,12 @@
     "ignore": [
       "firebase.json",
       "**/.*"
+    ],
+    "rewrites": [
+      {
+        "source": "/join/**",
+        "destination": "/join/index.html"
+      }
     ]
   },
   "emulators": {

@@ -253,6 +253,23 @@
   await signInAnonymously(auth);
   state.uid = auth.currentUser.uid;
 
+  // ── 招待ページ（backend/web/join/）からの遷移を処理する（Issue #28） ──
+  // 招待ページは「ルームが存在しWAITING中であること」の事前確認だけを行い、
+  // 実際の参加登録（players ドキュメントの作成）はここに一本化する。
+  // ?room=ROOMID&nickname=NICKNAME 付きで遷移してきた場合、ホーム画面の入力欄に
+  // 値を差し込んだ上で既存の joinRoom() をそのまま呼ぶ（存在確認・満員判定・
+  // players 登録・待合室遷移まで、通常の「参加する」ボタンと同じ経路を通る）。
+  const inviteParams = new URLSearchParams(location.search);
+  const inviteRoomId = inviteParams.get('room');
+  const inviteNickname = inviteParams.get('nickname');
+  if (inviteRoomId && inviteNickname) {
+    // 再読み込み時に同じ join を繰り返さないよう、処理前にURLからクエリを除去する。
+    history.replaceState(null, '', location.pathname);
+    document.getElementById('room-id-input').value = inviteRoomId.toUpperCase();
+    document.getElementById('nickname').value = inviteNickname;
+    joinRoom();
+  }
+
   // グローバル関数
   window.showScreen = showScreen;
   window.goToCreate = () => showScreen('create');
