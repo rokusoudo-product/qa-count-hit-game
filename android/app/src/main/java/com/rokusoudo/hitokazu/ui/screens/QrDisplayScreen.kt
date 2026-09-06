@@ -22,7 +22,10 @@ import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.rokusoudo.hitokazu.data.model.GamePhase
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
-private const val INVITE_BASE_URL = "https://hitokazu.rokusoudo.com/join/"
+// Firebase Hosting の配信ドメイン（README のアクセスURLと同一にすること）。
+// カスタムドメイン（hitokazu.rokusoudo.com）は Hosting 側の設定が未確認のため、
+// README に記載の hitokazu-game.web.app を正とする（Issue #28）。
+private const val INVITE_BASE_URL = "https://hitokazu-game.web.app/join/"
 
 @Composable
 fun QrDisplayScreen(

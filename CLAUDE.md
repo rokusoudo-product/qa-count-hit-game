@@ -25,7 +25,7 @@
 - **DB**: Cloud Firestore（ルーム・プレイヤー・回答・スコア管理）
 - **リアルタイム通信**: Firestore リスナー（onSnapshot）。WebSocket は使わない
 - **QRコード**: Android 側で生成・スキャンとも完結（ZXing）
-- **Web**: Firebase Hosting（招待リンク `web/public/join/`）
+- **Web**: Firebase Hosting（ゲーム本体 `backend/web/index.html` ＋ 招待リンク `backend/web/join/`。Hosting設定は `backend/firebase.json` の1つに統一。Issue #28）
 - **IaC**: `backend/firebase.json`（Functions / Firestore / Hosting / Emulator 設定）
 
 パッケージ名: `com.rokusoudo.hitokazu`

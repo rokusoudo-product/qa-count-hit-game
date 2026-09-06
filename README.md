@@ -61,7 +61,7 @@ flowchart TB
 
     subgraph Firebase["Firebase（GCP）"]
         direction LR
-        HOSTING["Firebase Hosting<br/>招待ページ<br/>web/public/join/"]
+        HOSTING["Firebase Hosting<br/>招待ページ<br/>backend/web/join/"]
         AUTH["Firebase Auth<br/>匿名認証"]
         FS[("Cloud Firestore<br/>rooms/{roomId}/<br/>players・rounds・answers")]
         FN["Cloud Functions Python 3.12<br/>us-central1<br/>create_room / join_room / start_game /<br/>submit_answer / submit_prediction"]
@@ -154,14 +154,16 @@ hitokazu-game/
 │       │   └── components/
 │       └── viewmodel/GameViewModel.kt
 ├── backend/
-│   ├── firebase.json      # Firebase設定
+│   ├── firebase.json      # Firebase設定（Hosting / Firestore / Functions / Emulator）
 │   ├── firestore.rules    # Firestoreセキュリティルール
 │   ├── firestore.indexes.json
 │   ├── functions/
 │   │   ├── main.py          # Cloud Functions
 │   │   └── game_logic.py    # 採点・集計・フェーズ遷移の純粋関数（backend/test_logic.py が直接import）
 │   └── web/
-│       └── index.html     # Webクライアント（ブラウザ参加用）
+│       ├── index.html     # Webクライアント（ブラウザ参加用・ゲーム本体）
+│       └── join/
+│           └── index.html # 招待ページ（/join/{roomId}。ルーム確認後ゲーム本体へ遷移）
 └── docs/                  # 仕様・要件（バックログは GitHub Issue が正）
 ```
 
@@ -325,12 +327,32 @@ cd android
 
 ### Webクライアント
 
+Hosting 設定はリポジトリ内に `backend/firebase.json` の1つだけです（ゲーム本体・招待ページとも
+`backend/web/` 配下から同一サイトとして配信されます。Issue #28 以前は `web/firebase.json` に
+招待ページ専用の設定が別に存在し、`backend/` からのデプロイでは配信対象外になっていました）。
+
 ```bash
 cd backend
 firebase deploy --only hosting
 ```
 
-アクセスURL: https://hitokazu-game.web.app
+アクセスURL:
+- ゲーム本体: https://hitokazu-game.web.app
+- 招待URL（QRコードもこの形式）: `https://hitokazu-game.web.app/join/{roomId}`（`firebase.json` の
+  rewrite で `backend/web/join/index.html` に振られる。ルームの存在・状態を確認した後、
+  ニックネームとルームIDを引き継いでゲーム本体へ遷移し、そのままプレイできる）
+
+> ⚠️ カスタムドメイン `hitokazu.rokusoudo.com` は Firebase Hosting 側の設定が未確認のため、
+> 招待URL・Android の QR コード・App Links とも上記の `hitokazu-game.web.app` を正としています。
+> カスタムドメインを使う場合は、Hosting 側の設定に加えて Android 側
+> （`QrDisplayScreen.kt` の `INVITE_BASE_URL` と `AndroidManifest.xml` の App Links ホスト）も
+> 揃えて更新してください。
+>
+> ⚠️ Android の App Links（`AndroidManifest.xml` の `autoVerify="true"`）が実際に検証されるには、
+> `https://hitokazu-game.web.app/.well-known/assetlinks.json` を、リリース署名鍵の SHA-256
+> フィンガープリントを含めて配信する必要があります。このファイルは本PRの時点では未配置のため、
+> ドメイン検証は未完了です（検証が済むまでは、リンクを開くとブラウザ選択のダイアログを
+> 経由してアプリが起動する形になります）。配置は代表の対応が必要です。
 
 ### Firestoreルール
 
