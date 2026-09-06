@@ -18,7 +18,7 @@ flowchart TB
     subgraph Firebase["Firebase（GCP）"]
         AUTH["Firebase Auth<br/>匿名認証"]
         FS[("Cloud Firestore<br/>rooms/{roomId}/<br/>players・rounds・answers")]
-        HOSTING["Firebase Hosting<br/>招待ページ web/public/join/"]
+        HOSTING["Firebase Hosting<br/>招待ページ backend/web/join/"]
         FN["Cloud Functions (HTTPS)<br/>Python 3.12 / us-central1<br/>create_room 他4関数"]
         SCHED["Cloud Scheduler<br/>1日1回"]
         SWEEP["Cloud Functions (Scheduled)<br/>delete_expired_rooms"]
@@ -28,7 +28,7 @@ flowchart TB
     WEB -->|匿名サインイン| AUTH
     AND <==>|直接読み書き＋リアルタイム購読| FS
     WEB <==>|直接読み書き＋リアルタイム購読| FS
-    HOSTING -.->|ルームIDを渡す| AND
+    HOSTING -.->|ルームID・ニックネームを<br/>クエリパラメータで渡す| WEB
     FN -.->|現状クライアントからは未使用| FS
     SCHED -->|1日1回起動| SWEEP
     SWEEP -->|expireAt超過ルームを<br/>サブコレクションごと再帰削除| FS
@@ -58,7 +58,7 @@ flowchart TB
 |--------------|---------|------|------|
 | リアルタイムDB | Cloud Firestore | ゲーム状態・プレイヤー・回答管理 | ✅ 使用中 |
 | 認証 | Firebase Authentication（匿名） | プレイヤー識別（uid） | ✅ 使用中 |
-| ホスティング | Firebase Hosting | 招待ページ `web/public/join/` | ✅ 使用中 |
+| ホスティング | Firebase Hosting | ゲーム本体 `backend/web/index.html` ＋ 招待ページ `backend/web/join/`（`backend/firebase.json` の rewrite で振り分け） | ✅ 使用中 |
 | リアルタイム通信 | Firestore リスナー（`addSnapshotListener`） | WebSocket 代替 | ✅ 使用中 |
 | サーバーレス関数（HTTPS） | Cloud Functions (Python 3.12 / us-central1) | ゲームロジック・採点 | ⚠️ **実装済みだが未使用** |
 | サーバーレス関数（スケジュール） | Cloud Functions (Python 3.12 / us-central1) + Cloud Scheduler | `delete_expired_rooms`：期限切れルームの自動削除（Issue #34） | ✅ 使用中 |
@@ -241,7 +241,7 @@ Firestore の TTL ポリシーは**親ドキュメントの削除のみを行い
 スコア = max(0, 100 - 差分 × 20)
 ```
 
-ぴったり当てると100点、1人ずれるごとに20点減点。実装は `FirebaseRepository` と `backend/test_logic.py` にある。
+ぴったり当てると100点、1人ずれるごとに20点減点。実装は `android/.../game/GameLogic.kt`（Android。実際に出荷される実装）・`backend/functions/game_logic.py`（Python。Cloud Functions・`backend/test_logic.py` が直接importして検証）・`backend/web/index.html`（Web）にある（Issue #29。以前は `backend/test_logic.py` がテストファイル内で採点式を自前に再実装しており、CIが検証していたのは出荷されないコピーだった）。
 
 ---
 
@@ -289,7 +289,9 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 
 | ファイル | 内容 | CI |
 |---|---|---|
-| `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存） | ✅ |
+| `android/app/src/test/.../game/GameLogicTest.kt` | Android採点・累計スコアロジック単体（`./gradlew testDebugUnitTest`。Issue #29） | ✅ |
+| `android/`（`./gradlew assembleDebug`） | Androidアプリのビルド（Kotlinのコンパイルエラー検知。Issue #29） | ✅ |
+| `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存。`backend/functions/game_logic.py` を直接import） | ✅ |
 | `backend/test_questions_sync.py` | 質問マスタの正本と3実装の一致検証 | ✅ |
 | `backend/rules-tests/` | Firestore ルール（Emulator 上で32件） | ✅ |
 | `backend/test_room_expiry.py` | ルーム保持期限・自動削除（`_sweep_expired_rooms`）の Emulator 統合テスト（Issue #34） | ✅ |

@@ -196,7 +196,7 @@ class MainActivity : ComponentActivity() {
         gameViewModel?.let { handleInviteIntent(intent, it) }
     }
 
-    // 招待URL（https://hitokazu.rokusoudo.com/join/{roomId}）からroomIdを抽出
+    // 招待URL（https://hitokazu-game.web.app/join/{roomId}）からroomIdを抽出
     private fun handleInviteIntent(intent: Intent, vm: GameViewModel) {
         if (intent.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return

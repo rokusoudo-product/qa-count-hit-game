@@ -27,7 +27,7 @@ UI（Android・Web）は `DESIGN.md` に準拠する。カラーコードの直�
 - **DB**: Cloud Firestore（ルーム・プレイヤー・回答・スコア管理）
 - **リアルタイム通信**: Firestore リスナー（onSnapshot）。WebSocket は使わない
 - **QRコード**: Android 側で生成・スキャンとも完結（ZXing）
-- **Web**: Firebase Hosting（招待リンク `web/public/join/`）
+- **Web**: Firebase Hosting（ゲーム本体 `backend/web/index.html` ＋ 招待リンク `backend/web/join/`。Hosting設定は `backend/firebase.json` の1つに統一。Issue #28）
 - **IaC**: `backend/firebase.json`（Functions / Firestore / Hosting / Emulator 設定）
 
 パッケージ名: `com.rokusoudo.hitokazu`
@@ -70,15 +70,18 @@ hitokazu_game/                    # リポジトリ名は qa-count-hit-game
 │   ├── firebase.json             #   Functions / Firestore / Hosting / Emulator
 │   ├── firestore.rules
 │   ├── functions/main.py         #   Cloud Functions 本体
+│   ├── functions/game_logic.py   #   採点・集計・フェーズ遷移の純粋関数（Firestore非依存。Issue #29）
 │   ├── functions/questions.py    #   質問マスタ（自動生成・直接編集しない）
 │   ├── web/index.html            #   Webクライアント（質問マスタは生成マーカーで自動反映）
-│   ├── test_logic.py             #   ロジック単体（Firestore 非依存）
+│   ├── test_logic.py             #   ロジック単体（Firestore 非依存。game_logic.py を直接import）
 │   ├── test_questions_sync.py    #   質問マスタの正本と3実装の同期テスト（Firestore 非依存）
 │   ├── test_room_expiry.py       #   ルーム保持期限・自動削除（delete_expired_rooms）の Emulator 統合テスト（Issue #34）
 │   ├── test_game_flow.py         #   Emulator 統合テスト
 │   └── test_functions.py         #   ⚠️ 本番 Firestore に直接書き込む
 ├── android/                      # エンジニア：Kotlin / Compose
-│   └── .../data/questions/Questions.kt  # 質問マスタ（自動生成・直接編集しない）
+│   ├── .../data/questions/Questions.kt  # 質問マスタ（自動生成・直接編集しない）
+│   ├── .../game/GameLogic.kt      # 採点・累計スコアの純粋関数（app/src/testで単体テスト。Issue #29）
+│   └── app/src/test/.../game/GameLogicTest.kt  # 上記のユニットテスト
 ├── web/                          # Firebase Hosting（招待リンク）
 └── archive/                      # AWS 旧実装（参照のみ・使用しない）
     └── backlog_aws.md            #   AWS 時代のバックログ（凍結。現行は GitHub Issue）
@@ -112,9 +115,16 @@ python3 backend/test_questions_sync.py        # 正本と3実装の内容一致�
 ## テスト実行
 
 ```bash
+cd android
+
+# Androidユニットテスト（Firestore非依存の採点・累計スコアロジックのみ。Issue #29）
+./gradlew testDebugUnitTest
+```
+
+```bash
 cd backend
 
-# ロジック単体（依存なし）
+# ロジック単体（依存なし。backend/functions/game_logic.py を直接import）
 python3 test_logic.py
 
 # Emulator 統合テスト（firebase CLI + Java が必要）

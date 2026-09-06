@@ -103,16 +103,21 @@
   <!-- Firebase SDKs -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, collection, addDoc, serverTimestamp }
+    import { getFirestore, doc, getDoc }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
     import { getAuth, signInAnonymously }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-    // google-services.json の内容に合わせて設定してください
-    const firebaseConfig = window.__FIREBASE_CONFIG__ || {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
+    // backend/web/index.html（ゲーム本体）と同じ Firebase プロジェクトの設定値。
+    // 招待ページとゲーム本体は同一 Hosting サイト（同一オリジン）で配信されるため、
+    // ここでの匿名サインインはゲーム本体へ遷移した後も維持される（Issue #28）。
+    const firebaseConfig = {
+      apiKey: "AIzaSyCWkpT6zhxIEpC2YF6u8SZc5Y89jWW6tvQ",
+      authDomain: "hitokazu-game.firebaseapp.com",
+      projectId: "hitokazu-game",
+      storageBucket: "hitokazu-game.firebasestorage.app",
+      messagingSenderId: "803714424801",
+      appId: "1:803714424801:android:eb741310f92ad70b96bca0"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -136,19 +141,26 @@
       el.style.display = "block";
     }
 
+    // このページでは players ドキュメントの登録は行わない。ここでの役割は
+    // 「ルームが存在し WAITING 中であること」の事前確認のみで、実際の参加登録
+    // （setDoc）はゲーム本体（backend/web/index.html）の joinRoom() に一本化する。
+    // 理由: 参加登録とプレイをそれぞれ別ページの別処理で行うと、匿名認証のuidが
+    // 何らかの理由でページ遷移後に引き継がれなかった場合（別オリジン化・
+    // ブラウザのプライベートモード等）、players に登録されたuidと実際にプレイする
+    // uidが食い違い、一度も回答できない「幽霊プレイヤー」を生む（Issue #28 の根本原因）。
+    // 登録処理をゲーム本体側の一箇所に集約すれば、この食い違いは原理的に起こらない。
     window.joinRoom = async function () {
       const nickname = document.getElementById("nickname").value.trim();
       if (!nickname || !roomId) return;
 
       document.getElementById("join-btn").disabled = true;
-      showMessage("参加しています…", "loading");
+      showMessage("確認しています…", "loading");
 
       try {
-        // 匿名サインイン
+        // ルーム読み取りには認証済みユーザーである必要がある（firestore.rules）ため、
+        // 存在・状態確認のためだけに匿名サインインする。
         await signInAnonymously(auth);
-        const uid = auth.currentUser.uid;
 
-        // ルームの存在・状態確認
         const roomRef = doc(db, "rooms", roomId);
         const roomSnap = await getDoc(roomRef);
 
@@ -164,17 +176,9 @@
           return;
         }
 
-        // プレイヤーとして登録
-        const { setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-        await setDoc(doc(db, "rooms", roomId, "players", uid), {
-          nickname: nickname,
-          isHost: false,
-          joinedAt: serverTimestamp(),
-          isWebPlayer: true,
-        });
-
-        showMessage(`「${nickname}」として参加しました！ホストがゲームを開始するまでお待ちください。`, "success");
-        document.getElementById("join-btn").textContent = "参加済み";
+        showMessage(`「${nickname}」として参加します。ゲーム画面に移動します…`, "success");
+        location.href = "../index.html?room=" + encodeURIComponent(roomId) +
+          "&nickname=" + encodeURIComponent(nickname);
 
       } catch (e) {
         console.error(e);

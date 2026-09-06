@@ -1,0 +1,30 @@
+{
+  "_comment": "CI専用のダミー google-services.json（Issue #29）。本番の値は一切含まない。google-services.json は .gitignore 対象のため実ファイルはコミットできず、CIでの ./gradlew testDebugUnitTest / assembleDebug を通すためのプレースホルダをこのファイル名で管理する。.github/workflows/ci.yml の android ジョブが、ビルド前にこのファイルを android/app/google-services.json へコピーする。実機・実プロジェクトへの接続はできない（api_key・project_number・mobilesdk_app_id はすべてダミー値）。",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "hitokazu-game-ci-placeholder",
+    "storage_bucket": "hitokazu-game-ci-placeholder.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "com.rokusoudo.hitokazu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUMMYPLACEHOLDERKEYNOTREAL0000000"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
