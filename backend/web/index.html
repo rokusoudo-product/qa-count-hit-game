@@ -816,28 +816,43 @@
     const nicknameMap = {};
     playersSnap.docs.forEach(d => nicknameMap[d.id] = d.data().nickname || '');
 
+    // 前ラウンドまでの累計スコアを取得（Android FirebaseRepository.finalizeRound と同一仕様。
+    // Issue #27: Web単独/Android混在いずれでも totalScore = 前ラウンドまでの累計 + roundScore とする）。
+    const prevTotals = roomData.cumulativeTotals || {};
+
+    const updatePromises = [];
     const scores = answerDocs
       .filter(d => d.data().prediction !== undefined)
       .map(d => {
         const data = d.data();
         const actual = counts[data.targetOption] || 0;
         const predicted = data.prediction || 0;
-        const score = Math.max(0, 100 - Math.abs(predicted - actual) * 20);
-        return { playerId: d.id, nickname: nicknameMap[d.id] || '', targetOption: data.targetOption, predictedCount: predicted, actualCount: actual, roundScore: score };
-      })
-      .sort((a, b) => b.roundScore - a.roundScore);
+        const roundScore = Math.max(0, 100 - Math.abs(predicted - actual) * 20);
+        const totalScore = (prevTotals[d.id] || 0) + roundScore;
+
+        updatePromises.push(updateDoc(d.ref, { roundScore, totalScore }));
+
+        return { playerId: d.id, nickname: nicknameMap[d.id] || '', targetOption: data.targetOption, predictedCount: predicted, actualCount: actual, roundScore, totalScore };
+      });
+    await Promise.all(updatePromises);
+
+    // 未提出だったプレイヤーは cumulativeTotals にエントリを残さない（Android と同じ挙動）。
+    const newTotals = {};
+    scores.forEach(s => { newTotals[s.playerId] = s.totalScore; });
 
     const isLast = currentRound >= totalRounds;
     if (isLast) {
+      const sortedByTotal = [...scores].sort((a, b) => b.totalScore - a.totalScore);
       // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
       await updateDoc(roomRef, {
-        status: 'FINISHED', finalScores: scores, finishedAt: serverTimestamp(),
+        status: 'FINISHED', finalScores: sortedByTotal, cumulativeTotals: newTotals, finishedAt: serverTimestamp(),
         expireAt: expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
       });
     } else {
+      const sortedByRound = [...scores].sort((a, b) => b.roundScore - a.roundScore);
       // ラウンド確定のたびに保持期限を延長する。遊び続けている限り実質失効しない（Issue #34）。
       await updateDoc(roomRef, {
-        status: 'RESULT', roundScores: scores, nextRound: currentRound + 1,
+        status: 'RESULT', roundScores: sortedByRound, cumulativeTotals: newTotals, nextRound: currentRound + 1,
         expireAt: expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
       });
     }
@@ -888,9 +903,16 @@
     document.getElementById('result-scores').innerHTML = scores.map((s, i) => {
       const isMe = s.playerId === state.uid;
       const name = escapeHtml((s.nickname || s.playerId) + (isMe ? '（あなた）' : ''));
+      // 累計点はAndroid（ResultScreen.kt の RankingRow）と同様、0点のときは表示しない。
+      const totalLine = s.totalScore > 0
+        ? `<div style="font-size:12px;color:#999">累計 ${s.totalScore}点</div>`
+        : '';
       return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
-        <span>${name}</span>
+        <div style="flex:1">
+          <div>${name}</div>
+          ${totalLine}
+        </div>
         <span class="score-pts">+${s.roundScore}点</span>
       </div>`;
     }).join('');
@@ -906,7 +928,7 @@
       return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
         <span>${name}</span>
-        <span class="score-pts">${s.roundScore}点</span>
+        <span class="score-pts">${s.totalScore}点</span>
       </div>`;
     }).join('');
     // 「もう一度遊ぶ」はホストにのみ表示（Android の FinishedScreen と同様）。
