@@ -2,11 +2,35 @@
 人数当てゲーム - ゲームロジック単体テスト
 Firestoreへの接続なしで、採点・状態遷移ロジックを検証する
 
+検証対象の実装（採点・集計・フェーズ遷移・再戦ロジック）は backend/functions/game_logic.py
+に純粋関数として実装されている。このファイルではロジックを再定義せず、その実装を import
+して検証する（Issue #29。以前はこのファイル内で採点式などを自前に再実装しており、
+CIが検証していたのは実際に出荷されるコードではなくこのテストファイル内のコピーだった）。
+game_logic.py は firebase_admin 等に依存しない純粋モジュールのため、追加の pip install なしに
+import できる。
+
 実行方法:
   python3 test_logic.py
 """
 
+import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "functions"))
+
+from game_logic import (  # noqa: E402  (sys.path 設定後に import する必要があるため)
+    calculate_score,
+    count_answers,
+    cumulative_total,
+    finalize_scores,
+    generate_room_id as _generate_room_id_impl,
+    get_next_status,
+    pick_first_question,
+    restart_room_fields,
+    round_doc_id,
+    should_finalize_round,
+    should_transition_to_predicting,
+)
 
 errors: list[str] = []
 
@@ -18,41 +42,6 @@ def check(label: str, condition: bool, detail: str = "") -> None:
         msg = f"  ❌ {label}" + (f"  ({detail})" if detail else "")
         print(msg)
         errors.append(msg)
-
-
-# ─── 採点ロジック ─────────────────────────────────────────────
-def calculate_score(actual: int, predicted: int) -> int:
-    return max(0, 100 - abs(predicted - actual) * 20)
-
-
-# ─── フェーズ遷移ロジック ─────────────────────────────────────
-def should_transition_to_predicting(answer_count: int, player_count: int) -> bool:
-    return answer_count >= player_count
-
-
-def should_finalize_round(prediction_count: int, player_count: int) -> bool:
-    return prediction_count >= player_count
-
-
-def get_next_status(current_round: int, total_rounds: int) -> str:
-    return "FINISHED" if current_round >= total_rounds else "RESULT"
-
-
-# ─── 集計ロジック ─────────────────────────────────────────────
-def count_answers(answers: list[str], options: list[str]) -> dict[str, int]:
-    return {opt: answers.count(opt) for opt in options}
-
-
-def finalize_scores(
-    predictions: list[dict],
-    answer_counts: dict[str, int],
-) -> list[dict]:
-    results = []
-    for p in predictions:
-        actual = answer_counts.get(p["targetOption"], 0)
-        score = calculate_score(actual, p["predictedCount"])
-        results.append({**p, "actualCount": actual, "roundScore": score})
-    return sorted(results, key=lambda x: x["roundScore"], reverse=True)
 
 
 # ═════════════════════════════════════════════════════════════
@@ -144,12 +133,11 @@ check("20人全員回答→PREDICTING", should_transition_to_predicting(20, 20))
 
 # ── TEST 7: ルームID形式 ─────────────────────────────────────
 print("\n[TEST 7] ルームID生成")
-import random
-import string
+
 
 def generate_room_id() -> str:
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(random.choices(chars, k=8))
+    return _generate_room_id_impl()
+
 
 for _ in range(100):
     rid = generate_room_id()
@@ -214,43 +202,20 @@ r_perfect_preds = [("X", "はい", 3)]
 totals_5 = simulate_rounds([(r_perfect_counts, r_perfect_preds)] * 5)
 check("5ラウンド満点: 500点", totals_5["X"] == 500, f"実際={totals_5['X']}")
 
+# 累計スコア加算そのもの（cumulative_total）の境界値
+check("累計加算: 0 + 100 = 100（初回ラウンド）", cumulative_total(0, 100) == 100)
+check("累計加算: 100 + 0 = 100（このラウンドは0点でも累計は減らない）", cumulative_total(100, 0) == 100)
+check("累計加算: 480 + 20 = 500（境界: 5ラウンド満点の最終加算と同じ値）",
+      cumulative_total(480, 20) == 500)
+
 # ── TEST 9: 再戦（restartGame, Issue #17）───────────────────
 print("\n[TEST 9] 再戦ロジック")
-
-
-def round_doc_id(game_count: int, round_num: int) -> str:
-    """FirebaseRepository.roundDocId() / index.html roundDocId() と同じ形式。"""
-    return f"{game_count}_{round_num}"
-
 
 check("1ゲーム目 round=1 のID", round_doc_id(1, 1) == "1_1")
 check("2ゲーム目（再戦後）round=1 のID", round_doc_id(2, 1) == "2_1")
 check("gameCountが違えば同じroundでも別ID",
       round_doc_id(1, 3) != round_doc_id(2, 3),
       f"{round_doc_id(1, 3)} vs {round_doc_id(2, 3)}")
-
-
-def pick_first_question(question_queue: list[dict], avoid_question_id: str | None) -> list[dict]:
-    """
-    startGame() の「前ゲーム最後の質問を1問目にしない」ロジックの純粋関数版。
-    Kotlin(FirebaseRepository.startGame) / JS(index.html startGame) と同じ優先順位:
-      1. queue内に別の質問があれば先頭と入れ替え
-      2. queue内が全部同じ質問なら諦める（呼び出し側でプール全体から探す運用は別途）
-    """
-    if not avoid_question_id or not question_queue:
-        return question_queue
-    if question_queue[0]["questionId"] != avoid_question_id:
-        return question_queue
-    alt_index = next(
-        (i for i, q in enumerate(question_queue) if q["questionId"] != avoid_question_id),
-        -1,
-    )
-    if alt_index > 0:
-        swapped = question_queue[:]
-        swapped[0], swapped[alt_index] = swapped[alt_index], swapped[0]
-        return swapped
-    return question_queue  # 代替なし
-
 
 queue_a = [{"questionId": "f001"}, {"questionId": "f002"}, {"questionId": "f003"}]
 result_a = pick_first_question(queue_a, "f001")
@@ -269,21 +234,6 @@ check("avoid_question_id が None なら何もしない", pick_first_question(qu
 
 # ── TEST 10: 再戦時のスコアリセット ──────────────────────────
 print("\n[TEST 10] 再戦時のスコアリセット")
-
-
-def restart_room_fields(prev_game_count: int) -> dict:
-    """restartGame() が上書きするフィールドの純粋関数版（category は含めない＝引き継ぐ）。"""
-    return {
-        "status": "WAITING",
-        "currentRound": 0,
-        "gameCount": prev_game_count + 1,
-        "currentQuestion": None,
-        "answerCounts": {},
-        "roundScores": [],
-        "finalScores": [],
-        "cumulativeTotals": {},
-    }
-
 
 restarted = restart_room_fields(prev_game_count=1)
 check("status が WAITING に戻る", restarted["status"] == "WAITING")

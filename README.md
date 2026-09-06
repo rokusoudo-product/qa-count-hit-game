@@ -121,7 +121,11 @@ npm --prefix rules-tests run test:emulator
 
 `main` 宛の Pull Request と `main` への push で [`.github/workflows/ci.yml`](.github/workflows/ci.yml) が自動実行されます。
 
-- `backend/test_logic.py`（採点ロジック単体テスト）
+- **`android`**（Androidユニットテスト・ビルド。Issue #29）
+  - `./gradlew testDebugUnitTest` — `android/app/src/test/` の `GameLogicTest`（採点ロジック・累計スコア・ラウンドドキュメントIDの純粋関数テスト）
+  - `./gradlew assembleDebug` — デバッグAPKのビルド（Kotlinのコンパイルエラーもここで検知）
+  - `google-services.json` は本番のFirebase値を含むため`.gitignore`対象でリポジトリにコミットされていない。CIでは本番値を含まないダミー（`android/app/google-services.ci.json`）を実際のパスへコピーして使う
+- `backend/test_logic.py`（採点ロジック単体テスト。`backend/functions/game_logic.py` の実装を直接importして検証する）
 - `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
 - `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス32件〔nicknameの検証7件を含む〕＋実ゲームフロー18件、Firebase Emulator上で実行）
 - `backend/test_room_expiry.py`（ルーム保持期限・自動削除のEmulator統合テスト。詳細は下記「ルームの保持期間と自動削除」）
@@ -144,6 +148,7 @@ hitokazu-game/
 │       ├── data/
 │       │   ├── firebase/FirebaseRepository.kt  # Firestore操作
 │       │   └── model/Models.kt                 # データモデル
+│       ├── game/GameLogic.kt   # 採点・累計スコアの純粋関数（Issue #29。app/src/test で単体テスト）
 │       ├── ui/
 │       │   ├── screens/   # 各画面のComposable
 │       │   └── components/
@@ -152,6 +157,9 @@ hitokazu-game/
 │   ├── firebase.json      # Firebase設定
 │   ├── firestore.rules    # Firestoreセキュリティルール
 │   ├── firestore.indexes.json
+│   ├── functions/
+│   │   ├── main.py          # Cloud Functions
+│   │   └── game_logic.py    # 採点・集計・フェーズ遷移の純粋関数（backend/test_logic.py が直接import）
 │   └── web/
 │       └── index.html     # Webクライアント（ブラウザ参加用）
 └── docs/                  # 仕様・要件（バックログは GitHub Issue が正）
@@ -306,6 +314,13 @@ python3 scripts/generate_questions.py --check # 同期しているか検証（CI
 cd android
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+ユニットテスト（`android/app/src/test/`、Firestoreに依存しない採点・累計スコアロジックのみが対象。Issue #29）:
+
+```bash
+cd android
+./gradlew testDebugUnitTest
 ```
 
 ### Webクライアント
