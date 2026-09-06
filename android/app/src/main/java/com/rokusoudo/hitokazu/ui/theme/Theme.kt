@@ -10,6 +10,10 @@ private val Primary = Color(0xFF1976D2)
 private val Secondary = Color(0xFFFF6F00)
 private val Background = Color(0xFFF5F5F5)
 
+// 残り時間わずかの警告色（DESIGN.md の --color-warning に対応）。
+// CountdownTimer.kt から参照し、テーマ外への直書きを解消する（Issue #37）。
+val Warning = Color(0xFFFFA000)
+
 private val LightColors = lightColorScheme(
     primary = Primary,
     secondary = Secondary,

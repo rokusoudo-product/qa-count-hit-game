@@ -5,10 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>人数当てゲーム</title>
   <style>
+    :root {
+      /* カラートークン（DESIGN.md と対応。Issue #37 で Android の配色に統一） */
+      --color-primary: #1976D2;
+      /* Android実機で実測した MaterialTheme.colorScheme.primaryContainer / onPrimaryContainer の値。
+         Theme.kt が primary/secondary 以外のロールを上書きしていないため Material3既定（薄紫）のまま。
+         DESIGN.md「プロジェクト固有ルール」参照。 */
+      --color-primary-container: #EADDFF;
+      --color-on-primary-container: #21005D;
+      --color-secondary: #FF6F00;
+      --color-background: #F5F5F5;
+      --color-surface: #FFFFFF;
+      --color-surface-alt: #E0E0E0;
+      --color-text-primary: #333333;
+      --color-text-secondary: #555555;
+      --color-text-muted: #888888;
+      --color-text-faint: #AAAAAA;
+      --color-border: #DDDDDD;
+      --color-divider: #EEEEEE;
+      --color-error: #D32F2F;
+      --color-error-bg: #FFEBEE;
+      --color-success: #388E3C;
+      --color-warning: #FFA000;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
-      background: #f5f5f5;
+      background: var(--color-background);
       display: flex;
       justify-content: center;
       align-items: flex-start;
@@ -16,28 +39,28 @@
       padding: 20px;
     }
     .container {
-      background: white;
+      background: var(--color-surface);
       border-radius: 16px;
       padding: 24px;
       width: 100%;
       max-width: 480px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.1);
     }
-    h1 { font-size: 22px; text-align: center; margin-bottom: 24px; color: #333; }
-    h2 { font-size: 18px; margin-bottom: 16px; color: #333; }
+    h1 { font-size: 22px; text-align: center; margin-bottom: 24px; color: var(--color-text-primary); }
+    h2 { font-size: 18px; margin-bottom: 16px; color: var(--color-text-primary); }
     .screen { display: none; }
     .screen.active { display: block; }
     input, select {
       width: 100%;
       padding: 12px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 8px;
       font-size: 16px;
       margin-bottom: 12px;
       font-family: inherit;
-      background: white;
+      background: var(--color-surface);
     }
-    label.field-label { display: block; margin-bottom: 6px; color: #555; font-size: 14px; }
+    label.field-label { display: block; margin-bottom: 6px; color: var(--color-text-secondary); font-size: 14px; }
     button {
       width: 100%;
       padding: 14px;
@@ -50,44 +73,44 @@
       transition: opacity 0.2s;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: #6200ea; color: white; }
-    .btn-secondary { background: #e0e0e0; color: #333; }
-    .btn-answer { background: #1976d2; color: white; font-size: 18px; padding: 18px; }
-    .btn-answer.selected { background: #0d47a1; border: 3px solid #82b1ff; }
-    .error { color: #d32f2f; font-size: 14px; margin-bottom: 8px; padding: 8px; background: #ffebee; border-radius: 8px; }
-    .info { color: #555; font-size: 14px; margin-bottom: 16px; }
+    .btn-primary { background: var(--color-primary); color: white; }
+    .btn-secondary { background: var(--color-surface-alt); color: var(--color-text-primary); }
+    .btn-answer { background: var(--color-primary); color: white; font-size: 18px; padding: 18px; }
+    .btn-answer.selected { background: var(--color-secondary); }
+    .error { color: var(--color-error); font-size: 14px; margin-bottom: 8px; padding: 8px; background: var(--color-error-bg); border-radius: 8px; }
+    .info { color: var(--color-text-secondary); font-size: 14px; margin-bottom: 16px; }
     .player-list { list-style: none; }
-    .player-list li { padding: 10px; border-bottom: 1px solid #eee; font-size: 15px; }
+    .player-list li { padding: 10px; border-bottom: 1px solid var(--color-divider); font-size: 15px; }
     .player-list li:last-child { border-bottom: none; }
-    .badge { display: inline-block; background: #6200ea; color: white; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+    .badge { display: inline-block; background: var(--color-primary); color: white; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
     .question-card {
-      background: #ede7f6;
+      background: var(--color-primary-container);
       border-radius: 12px;
       padding: 20px;
       margin-bottom: 20px;
       text-align: center;
     }
-    .question-text { font-size: 20px; font-weight: bold; color: #311b92; }
-    .round-info { font-size: 13px; color: #777; margin-bottom: 8px; }
+    .question-text { font-size: 20px; font-weight: bold; color: var(--color-on-primary-container); }
+    .round-info { font-size: 13px; color: var(--color-text-muted); margin-bottom: 8px; }
     .count-bar {
       display: flex;
       align-items: center;
       margin-bottom: 8px;
     }
     .count-bar span { width: 120px; font-size: 15px; }
-    .count-bar .bar-wrap { flex: 1; background: #eee; border-radius: 4px; height: 12px; margin: 0 8px; }
-    .count-bar .bar { background: #6200ea; height: 12px; border-radius: 4px; transition: width 0.5s; }
-    .count-bar .num { font-weight: bold; font-size: 15px; color: #6200ea; }
-    .score-card { background: #f3e5f5; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #e1bee7; }
+    .count-bar .bar-wrap { flex: 1; background: var(--color-divider); border-radius: 4px; height: 12px; margin: 0 8px; }
+    .count-bar .bar { background: var(--color-primary); height: 12px; border-radius: 4px; transition: width 0.5s; }
+    .count-bar .num { font-weight: bold; font-size: 15px; color: var(--color-primary); }
+    .score-card { background: var(--color-primary-container); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--color-divider); }
     .score-row:last-child { border-bottom: none; }
     .rank { font-size: 20px; width: 36px; }
-    .score-pts { font-weight: bold; color: #6200ea; }
-    .waiting-count { font-size: 14px; color: #888; text-align: center; margin-top: 8px; }
+    .score-pts { font-weight: bold; color: var(--color-primary); }
+    .waiting-count { font-size: 14px; color: var(--color-text-muted); text-align: center; margin-top: 8px; }
     .predict-input { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
     .predict-input input { margin-bottom: 0; }
-    .sent-msg { text-align: center; color: #388e3c; font-size: 15px; padding: 16px; }
-    .spinner { text-align: center; color: #888; padding: 20px; }
+    .sent-msg { text-align: center; color: var(--color-success); font-size: 15px; padding: 16px; }
+    .spinner { text-align: center; color: var(--color-text-muted); padding: 20px; }
   </style>
 </head>
 <body>
@@ -100,7 +123,7 @@
     <input id="nickname" type="text" placeholder="ニックネーム" maxlength="20">
     <input id="room-id-input" type="text" placeholder="ルームID（参加する場合）" maxlength="10" style="text-transform:uppercase">
     <button class="btn-primary" onclick="joinRoom()">参加する</button>
-    <p style="text-align:center;color:#aaa;margin:8px 0">または</p>
+    <p style="text-align:center;color:var(--color-text-faint);margin:8px 0">または</p>
     <button class="btn-secondary" onclick="goToCreate()">新しくルームを作る（ホスト）</button>
   </div>
 
@@ -910,11 +933,11 @@
     const scores = data.roundScores || [];
     const myScore = scores.find(s => s.playerId === state.uid);
     document.getElementById('my-score-card').innerHTML = myScore ? `
-      <div class="score-card" style="background:#ede7f6;margin-bottom:12px">
+      <div class="score-card" style="background:var(--color-primary-container);margin-bottom:12px">
         ${myScore.roundScore === 100 ? '<p style="text-align:center;font-size:18px">🎯 パーフェクト！</p>' : ''}
         <p>あなたの予測: 「${myScore.targetOption}」が ${myScore.predictedCount}人</p>
         <p>実際: ${myScore.actualCount}人</p>
-        <p style="font-size:24px;font-weight:bold;color:#6200ea;text-align:center">+${myScore.roundScore}点</p>
+        <p style="font-size:24px;font-weight:bold;color:var(--color-primary);text-align:center">+${myScore.roundScore}点</p>
       </div>` : '';
 
     document.getElementById('result-scores').innerHTML = scores.map((s, i) => {
@@ -922,9 +945,10 @@
       const name = escapeHtml((s.nickname || s.playerId) + (isMe ? '（あなた）' : ''));
       // 累計点はAndroid（ResultScreen.kt の RankingRow）と同様、0点のときは表示しない。
       const totalLine = s.totalScore > 0
-        ? `<div style="font-size:12px;color:#999">累計 ${s.totalScore}点</div>`
+        ? `<div style="font-size:12px;color:var(--color-text-muted)">累計 ${s.totalScore}点</div>`
         : '';
-      return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
+      return `<div class="score-row" style="${isMe ? 'background:var(--color-primary-container)' : ''}">
+
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
         <div style="flex:1">
           <div>${name}</div>
@@ -942,7 +966,7 @@
     document.getElementById('final-scores').innerHTML = scores.map((s, i) => {
       const isMe = s.playerId === state.uid;
       const name = escapeHtml((s.nickname || s.playerId) + (isMe ? '（あなた）' : ''));
-      return `<div class="score-row" style="${isMe ? 'background:#f3e5f5' : ''}">
+      return `<div class="score-row" style="${isMe ? 'background:var(--color-primary-container)' : ''}">
         <span class="rank">${['🥇','🥈','🥉'][i] || (i+1)+'位'}</span>
         <span>${name}</span>
         <span class="score-pts">${s.totalScore}点</span>

@@ -6,10 +6,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rokusoudo.hitokazu.ui.theme.Warning
 import kotlinx.coroutines.delay
 
 @Composable
@@ -35,7 +35,7 @@ fun CountdownTimer(
 
     val color = when {
         remaining > totalSeconds * 0.5f -> MaterialTheme.colorScheme.primary
-        remaining > totalSeconds * 0.25f -> Color(0xFFFFA000)
+        remaining > totalSeconds * 0.25f -> Warning
         else -> MaterialTheme.colorScheme.error
     }
 
