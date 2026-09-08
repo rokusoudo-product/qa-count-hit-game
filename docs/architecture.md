@@ -241,7 +241,27 @@ Firestore の TTL ポリシーは**親ドキュメントの削除のみを行い
 スコア = max(0, 100 - 差分 × 20)
 ```
 
-ぴったり当てると100点、1人ずれるごとに20点減点。実装は `android/.../game/GameLogic.kt`（Android。実際に出荷される実装）・`backend/functions/game_logic.py`（Python。Cloud Functions・`backend/test_logic.py` が直接importして検証）・`backend/web/index.html`（Web）にある（Issue #29。以前は `backend/test_logic.py` がテストファイル内で採点式を自前に再実装しており、CIが検証していたのは出荷されないコピーだった）。
+ぴったり当てると100点、1人ずれるごとに20点減点。実装は `android/.../game/GameLogic.kt`（Android）・`backend/functions/game_logic.py`（Python。Cloud Functions）・`backend/web/game_logic.js`（Web。Issue #45 で `index.html` から切り出した）の3箇所にある。すべて実際に出荷される実装で、各テストファイル（`GameLogicTest.kt` / `test_logic.py` / `game_logic.test.mjs`）がそれを直接importして検証する（以前は `backend/test_logic.py` がテストファイル内で採点式を自前に再実装しており、CIが検証していたのは出荷されないコピーだった。Issue #29）。
+
+### 採点・集計の期待値の単一正本（Issue #45）
+
+採点式の境界値・累計スコアの加算・回答集計・ラウンド確定時の並べ替え・最終順位の並べ替え・
+ルーム保持期限（`expireAt`）の期待値は **[`shared/logic_vectors.json`](../shared/logic_vectors.json) が単一の正本**。
+質問マスタ（`shared/questions.json`）と同じ考え方で、3実装のテストがこのファイルを読み込んで
+検証するため、期待値をテストコード内にハードコードしない。
+
+| 実装 | 読み込み方法 |
+|---|---|
+| `android/app/src/test/.../game/GameLogicTest.kt` | Gradleタスク `copyLogicVectors`（`app/build.gradle.kts`）が `src/test/resources/` へコピーし、classpathリソースとして読む。テストコードから相対パスで直接読まないのは、Gradleのテスト実行時カレントディレクトリが環境によって変わり得るため（CIで確実に動く方を選んだ。Issue #45の未解決の質問への回答） |
+| `backend/web/game_logic.test.mjs` | テストファイルからの相対パス（`../../shared/logic_vectors.json`）で直接読む。Node の `node --test` で実行し、リポジトリのルート位置は固定なので相対パス読み込みで問題ない |
+| `backend/test_logic.py` | `Path(__file__).resolve().parent.parent / "shared" / "logic_vectors.json"` で直接読む |
+
+Kotlin の `GameLogic.kt` は `calculateScore` / `cumulativeTotal` / `roundDocId` の3関数のみを持つため
+（Issue #29 時点のスコープ）、`GameLogicTest.kt` が読むのはベクタのうち該当する3セクションのみ。
+`countAnswers` / `finalizeRoundScores` / `cumulativeTotalsAfterRound` / `sortFinalScoresByTotal` は
+JavaScript・Pythonの2実装のテストが検証する。
+
+ベクタの期待値をわざと変えると、それを参照する実装すべてのテストがレッドになることを確認済み。
 
 ---
 
@@ -292,6 +312,7 @@ python3 scripts/generate_questions.py --check # 同期検証のみ（CI で実�
 | `android/app/src/test/.../game/GameLogicTest.kt` | Android採点・累計スコアロジック単体（`./gradlew testDebugUnitTest`。Issue #29） | ✅ |
 | `android/`（`./gradlew assembleDebug`） | Androidアプリのビルド（Kotlinのコンパイルエラー検知。Issue #29） | ✅ |
 | `backend/test_logic.py` | 採点ロジック単体（Firestore 非依存。`backend/functions/game_logic.py` を直接import） | ✅ |
+| `backend/web/game_logic.test.mjs` | Web採点ロジック単体（Firestore 非依存。`backend/web/game_logic.js` を直接import。`node --test`。Issue #45） | ✅ |
 | `backend/test_questions_sync.py` | 質問マスタの正本と3実装の一致検証 | ✅ |
 | `backend/rules-tests/` | Firestore ルール（Emulator 上で32件） | ✅ |
 | `backend/test_room_expiry.py` | ルーム保持期限・自動削除（`_sweep_expired_rooms`）の Emulator 統合テスト（Issue #34） | ✅ |

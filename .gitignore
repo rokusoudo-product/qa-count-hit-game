@@ -35,6 +35,9 @@ android/app/build/
 *.jks
 google-services.json
 
+# shared/logic_vectors.json のコピー（Gradleタスク copyLogicVectors が生成。正本は shared/ 側。Issue #45）
+android/app/src/test/resources/logic_vectors.json
+
 # IDE
 .idea/
 .vscode/

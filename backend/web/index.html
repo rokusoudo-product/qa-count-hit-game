@@ -220,6 +220,14 @@
     getFirestore, doc, collection, setDoc, updateDoc, getDoc, getDocs,
     onSnapshot, serverTimestamp, increment, deleteField, deleteDoc
   } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  // Firestoreに依存しない採点・集計ロジックの純正関数（Kotlin/Pythonと採点式を共有。
+  // 期待値の単一正本は shared/logic_vectors.json。以前はこのファイルに直接埋め込まれており
+  // テスト可能な形になっていなかった。Issue #45）。
+  import {
+    cumulativeTotal, shouldTransitionToPredicting, shouldFinalizeRound,
+    getNextStatus, countAnswers, finalizeRoundScores, computeCumulativeTotals,
+    sortByTotalDesc, expireAtAfterHours, roundDocId,
+  } from './game_logic.js';
 
   const app = initializeApp({
     apiKey: "AIzaSyCWkpT6zhxIEpC2YF6u8SZc5Y89jWW6tvQ",
@@ -251,10 +259,7 @@
   // 端末クロックから計算する（削除は1日1回のバッチ実行のため、多少のクロックずれは吸収される）。
   const ROOM_WAITING_RETENTION_HOURS = 6;
   const ROOM_FINISHED_RETENTION_HOURS = 24;
-
-  function expireAtAfterHours(hours) {
-    return new Date(Date.now() + hours * 60 * 60 * 1000);
-  }
+  // expireAtAfterHours() は game_logic.js からimport（Issue #45）。
 
   // 直近参加していたルームIDをブラウザに保存するためのキー（Issue #49）。
   const LAST_ROOM_STORAGE_KEY = 'hitokazu_last_room_id';
@@ -787,12 +792,7 @@
     return a;
   }
 
-  // rounds サブコレクションのドキュメントID。gameCount を含めることで、restartGame() 後の
-  // 2ゲーム目が前ゲームの rounds/{round}/answers と衝突しないようにする（Issue #17）。
-  // Android（FirebaseRepository.roundDocId）と同じ形式にすること。
-  function roundDocId(gameCount, round) {
-    return `${gameCount || 1}_${round}`;
-  }
+  // roundDocId() は game_logic.js からimport（Issue #45。以前はここに直接定義されていた）。
 
   async function startGame() {
     const roomRef = doc(db, 'rooms', state.roomId);
@@ -874,7 +874,7 @@
       getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
     ]);
 
-    if (answers.size >= players.size) {
+    if (shouldTransitionToPredicting(answers.size, players.size)) {
       await advanceToPredicting(roomRef, roomData, answers.docs);
     }
   }
@@ -883,12 +883,7 @@
   // 全員回答時（submitAnswer）と、タイムアウト強制確定（forceAdvanceFromAnswering）の両方から呼ばれる。
   async function advanceToPredicting(roomRef, roomData, answerDocs) {
     const q = roomData.currentQuestion;
-    const counts = {};
-    q.options.forEach(o => counts[o] = 0);
-    answerDocs.forEach(d => {
-      const a = d.data().answer;
-      if (a in counts) counts[a]++;
-    });
+    const counts = countAnswers(answerDocs.map(d => d.data().answer), q.options);
     await updateDoc(roomRef, { status: 'PREDICTING', answerCounts: counts, phaseStartedAt: serverTimestamp() });
   }
 
@@ -959,7 +954,7 @@
     ]);
 
     const predicted = answers.docs.filter(d => d.data().prediction !== undefined);
-    if (predicted.size >= players.size || predicted.length >= players.size) {
+    if (shouldFinalizeRound(predicted.length, players.size)) {
       await finalizeRound(roomRef, roomData, currentRound, answers.docs);
     }
   }
@@ -1040,39 +1035,48 @@
     // Issue #27: Web単独/Android混在いずれでも totalScore = 前ラウンドまでの累計 + roundScore とする）。
     const prevTotals = roomData.cumulativeTotals || {};
 
-    const updatePromises = [];
-    const scores = answerDocs
-      .filter(d => d.data().prediction !== undefined)
-      .map(d => {
-        const data = d.data();
-        const actual = counts[data.targetOption] || 0;
-        const predicted = data.prediction || 0;
-        const roundScore = Math.max(0, 100 - Math.abs(predicted - actual) * 20);
-        const totalScore = (prevTotals[d.id] || 0) + roundScore;
+    const submitted = answerDocs.filter(d => d.data().prediction !== undefined);
+    const predictions = submitted.map(d => {
+      const data = d.data();
+      return {
+        playerId: d.id,
+        nickname: nicknameMap[d.id] || '',
+        targetOption: data.targetOption,
+        predictedCount: data.prediction || 0,
+      };
+    });
 
-        updatePromises.push(updateDoc(d.ref, { roundScore, totalScore }));
+    // 採点・ラウンドスコア降順の並べ替えは game_logic.js の純正関数に委譲する
+    // （Kotlin/Pythonと採点式を共有。期待値の単一正本は shared/logic_vectors.json。Issue #45）。
+    const scored = finalizeRoundScores(predictions, counts);
+    const scores = scored.map(s => ({
+      ...s,
+      totalScore: cumulativeTotal(prevTotals[s.playerId] || 0, s.roundScore),
+    }));
 
-        return { playerId: d.id, nickname: nicknameMap[d.id] || '', targetOption: data.targetOption, predictedCount: predicted, actualCount: actual, roundScore, totalScore };
-      });
-    await Promise.all(updatePromises);
+    await Promise.all(scores.map(s => {
+      const d = submitted.find(doc => doc.id === s.playerId);
+      return updateDoc(d.ref, { roundScore: s.roundScore, totalScore: s.totalScore });
+    }));
 
     // 未提出だったプレイヤーは cumulativeTotals にエントリを残さない（Android と同じ挙動）。
-    const newTotals = {};
-    scores.forEach(s => { newTotals[s.playerId] = s.totalScore; });
+    const newTotals = computeCumulativeTotals(
+      prevTotals,
+      scores.map(s => ({ playerId: s.playerId, roundScore: s.roundScore })),
+    );
 
-    const isLast = currentRound >= totalRounds;
-    if (isLast) {
-      const sortedByTotal = [...scores].sort((a, b) => b.totalScore - a.totalScore);
+    if (getNextStatus(currentRound, totalRounds) === 'FINISHED') {
+      const sortedByTotal = sortByTotalDesc(scores);
       // 終了扱いになるので保持期限を「終了から24時間」に更新する（Issue #34）。
       await updateDoc(roomRef, {
         status: 'FINISHED', finalScores: sortedByTotal, cumulativeTotals: newTotals, finishedAt: serverTimestamp(),
         expireAt: expireAtAfterHours(ROOM_FINISHED_RETENTION_HOURS),
       });
     } else {
-      const sortedByRound = [...scores].sort((a, b) => b.roundScore - a.roundScore);
+      // scores は finalizeRoundScores() が既に roundScore 降順に並べているので、そのまま使う。
       // ラウンド確定のたびに保持期限を延長する。遊び続けている限り実質失効しない（Issue #34）。
       await updateDoc(roomRef, {
-        status: 'RESULT', roundScores: sortedByRound, cumulativeTotals: newTotals, nextRound: currentRound + 1,
+        status: 'RESULT', roundScores: scores, cumulativeTotals: newTotals, nextRound: currentRound + 1,
         expireAt: expireAtAfterHours(ROOM_WAITING_RETENTION_HOURS),
       });
     }

@@ -9,17 +9,24 @@ CIが検証していたのは実際に出荷されるコードではなくこの
 game_logic.py は firebase_admin 等に依存しない純粋モジュールのため、追加の pip install なしに
 import できる。
 
+採点・集計・累計スコア・最終順位並べ替え・ラウンドドキュメントIDの期待値は
+shared/logic_vectors.json（単一正本。Kotlin・JavaScriptと共有）から読み込む。
+このファイル内には期待値をハードコードしない（Issue #45）。
+
 実行方法:
   python3 test_logic.py
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "functions"))
 
 from game_logic import (  # noqa: E402  (sys.path 設定後に import する必要があるため)
     calculate_score,
+    compute_cumulative_totals,
     count_answers,
     cumulative_total,
     finalize_scores,
@@ -30,7 +37,13 @@ from game_logic import (  # noqa: E402  (sys.path 設定後に import する必�
     round_doc_id,
     should_finalize_round,
     should_transition_to_predicting,
+    sort_by_total_desc,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+VECTORS_PATH = REPO_ROOT / "shared" / "logic_vectors.json"
+with open(VECTORS_PATH, encoding="utf-8") as f:
+    VECTORS = json.load(f)
 
 errors: list[str] = []
 
@@ -49,37 +62,18 @@ print("=" * 55)
 print("人数当てゲーム ロジック単体テスト")
 print("=" * 55)
 
-# ── TEST 1: 採点ロジック ──────────────────────────────────────
+# ── TEST 1: 採点ロジック（shared/logic_vectors.json が単一正本） ──────────
 print("\n[TEST 1] 採点ロジック")
-cases = [
-    (5, 5, 100, "ぴったり"),
-    (5, 4, 80,  "差1"),
-    (5, 3, 60,  "差2"),
-    (5, 2, 40,  "差3"),
-    (5, 1, 20,  "差4"),
-    (5, 0, 0,   "差5"),
-    (5, 6, 80,  "オーバー差1"),
-    (5, 10, 0,  "オーバー差5以上"),
-    (0, 0, 100, "0人ぴったり"),
-    (0, 1, 80,  "0人に対し1予測"),
-    (0, 5, 0,   "0人に対し5予測"),
-]
-for actual, pred, expected, label in cases:
-    result = calculate_score(actual, pred)
-    check(f"{label}: actual={actual}, pred={pred} → {expected}点", result == expected,
-          f"実際={result}点")
+for c in VECTORS["calculateScore"]:
+    result = calculate_score(c["actual"], c["predicted"])
+    check(f"{c['label']}: actual={c['actual']}, predicted={c['predicted']} → {c['expected']}点",
+          result == c["expected"], f"実際={result}点")
 
-# ── TEST 2: 回答集計 ──────────────────────────────────────────
+# ── TEST 2: 回答集計（shared/logic_vectors.json が単一正本） ─────────────
 print("\n[TEST 2] 回答集計")
-answers = ["はい", "いいえ", "はい", "はい", "いいえ"]
-counts = count_answers(answers, ["はい", "いいえ"])
-check("はい=3", counts["はい"] == 3)
-check("いいえ=2", counts["いいえ"] == 2)
-check("合計=参加人数", sum(counts.values()) == len(answers))
-
-answers2 = ["はい", "はい", "はい", "はい"]
-counts2 = count_answers(answers2, ["はい", "いいえ"])
-check("全員はい: はい=4, いいえ=0", counts2["はい"] == 4 and counts2["いいえ"] == 0)
+for c in VECTORS["countAnswers"]:
+    result = count_answers(c["answers"], c["options"])
+    check(f"{c['label']}: {result}", result == c["expected"], f"期待={c['expected']}")
 
 # ── TEST 3: フェーズ遷移（ANSWERING→PREDICTING）──────────────
 print("\n[TEST 3] フェーズ遷移")
@@ -97,23 +91,15 @@ check("途中ラウンド → RESULT",   get_next_status(3, 5) == "RESULT")
 check("第1ラウンド → RESULT",    get_next_status(1, 5) == "RESULT")
 check("round=total-1 → RESULT", get_next_status(4, 5) == "RESULT")
 
-# ── TEST 5: ラウンドスコア集計 ───────────────────────────────
+# ── TEST 5: ラウンドスコア集計（shared/logic_vectors.json が単一正本） ───
 print("\n[TEST 5] ラウンドスコア集計・ランキング")
-answer_counts = {"はい": 3, "いいえ": 1}
-predictions = [
-    {"playerId": "A", "nickname": "太郎", "targetOption": "はい",   "predictedCount": 3},
-    {"playerId": "B", "nickname": "花子", "targetOption": "はい",   "predictedCount": 2},
-    {"playerId": "C", "nickname": "次郎", "targetOption": "いいえ", "predictedCount": 1},
-    {"playerId": "D", "nickname": "桜",   "targetOption": "はい",   "predictedCount": 1},
-]
-scores = finalize_scores(predictions, answer_counts)
-
-check("A(太郎): 差0→100点", scores[0]["playerId"] in ("A", "C") and scores[0]["roundScore"] == 100)
-check("C(次郎): 差0→100点", any(s["playerId"] == "C" and s["roundScore"] == 100 for s in scores))
-check("B(花子): 差1→80点",  any(s["playerId"] == "B" and s["roundScore"] == 80  for s in scores))
-check("D(桜):   差2→60点",  any(s["playerId"] == "D" and s["roundScore"] == 60  for s in scores))
-check("降順ソート",
-      scores[0]["roundScore"] >= scores[1]["roundScore"] >= scores[2]["roundScore"] >= scores[3]["roundScore"])
+for c in VECTORS["finalizeRoundScores"]:
+    scores = finalize_scores(c["predictions"], c["answerCounts"])
+    simplified = [
+        {"playerId": s["playerId"], "actualCount": s["actualCount"], "roundScore": s["roundScore"]}
+        for s in scores
+    ]
+    check(f"{c['label']}: {simplified}", simplified == c["expected"], f"期待={c['expected']}")
 
 # ── TEST 6: エッジケース ─────────────────────────────────────
 print("\n[TEST 6] エッジケース")
@@ -196,23 +182,36 @@ check("B 累計: 80+80=160",   totals["B"] == 160, f"実際={totals['B']}")
 check("C 累計: 100+100=200", totals["C"] == 200, f"実際={totals['C']}")
 check("D 累計: 60+100=160",  totals["D"] == 160, f"実際={totals['D']}")
 
-# 5ラウンド満点の場合
+# 5ラウンド満点の場合（期待値をハードコードせず、1ラウンド分のスコア×5として導出する）
 r_perfect_counts = {"はい": 3, "いいえ": 2}
 r_perfect_preds = [("X", "はい", 3)]
 totals_5 = simulate_rounds([(r_perfect_counts, r_perfect_preds)] * 5)
-check("5ラウンド満点: 500点", totals_5["X"] == 500, f"実際={totals_5['X']}")
+perfect_round_score = calculate_score(actual=3, predicted=3)
+check("5ラウンド満点の累計は1ラウンド分×5と一致する",
+      totals_5["X"] == perfect_round_score * 5, f"実際={totals_5['X']}")
 
-# 累計スコア加算そのもの（cumulative_total）の境界値
-check("累計加算: 0 + 100 = 100（初回ラウンド）", cumulative_total(0, 100) == 100)
-check("累計加算: 100 + 0 = 100（このラウンドは0点でも累計は減らない）", cumulative_total(100, 0) == 100)
-check("累計加算: 480 + 20 = 500（境界: 5ラウンド満点の最終加算と同じ値）",
-      cumulative_total(480, 20) == 500)
+# 累計スコア加算そのもの（cumulative_total）の境界値（shared/logic_vectors.json が単一正本）
+for c in VECTORS["cumulativeTotal"]:
+    result = cumulative_total(c["previousTotal"], c["roundScore"])
+    check(f"累計加算: {c['label']} → {c['expected']}", result == c["expected"], f"実際={result}")
+
+# 未提出プレイヤーの扱い（Issue #27: 前回まで累計を持っていても今回未提出ならエントリを残さない）
+for c in VECTORS["cumulativeTotalsAfterRound"]:
+    result = compute_cumulative_totals(c["previousTotals"], c["roundResults"])
+    check(f"cumulativeTotals: {c['label']}", result == c["expected"], f"実際={result}")
+
+# 最終順位の並べ替え（totalScore降順）
+for c in VECTORS["sortFinalScoresByTotal"]:
+    order = [s["playerId"] for s in sort_by_total_desc(c["scores"])]
+    check(f"最終順位: {c['label']} → {order}", order == c["expectedOrder"], f"期待={c['expectedOrder']}")
 
 # ── TEST 9: 再戦（restartGame, Issue #17）───────────────────
 print("\n[TEST 9] 再戦ロジック")
 
-check("1ゲーム目 round=1 のID", round_doc_id(1, 1) == "1_1")
-check("2ゲーム目（再戦後）round=1 のID", round_doc_id(2, 1) == "2_1")
+for c in VECTORS["roundDocId"]:
+    result = round_doc_id(c["gameCount"], c["round"])
+    check(f"roundDocId(gameCount={c['gameCount']}, round={c['round']}) → \"{c['expected']}\"",
+          result == c["expected"], f"実際={result}")
 check("gameCountが違えば同じroundでも別ID",
       round_doc_id(1, 3) != round_doc_id(2, 3),
       f"{round_doc_id(1, 3)} vs {round_doc_id(2, 3)}")
