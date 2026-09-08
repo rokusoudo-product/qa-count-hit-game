@@ -86,6 +86,18 @@ jobs:
       - name: Run question master sync test
         run: python3 backend/test_questions_sync.py
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # backend/web/game_logic.js（Web採点ロジック。Firestore非依存）のユニットテスト。
+      # Node標準の node --test を使う（backend/rules-tests/ と同じ構成で、新規依存を増やさない。
+      # Issue #45）。採点・集計・累計スコアの期待値は shared/logic_vectors.json（Kotlin/Pythonと
+      # 共有する単一正本）を読み込んで検証するため、ここでは追加のセットアップは不要。
+      - name: Run Web (JavaScript) logic unit tests
+        run: node --test backend/web/game_logic.test.mjs
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

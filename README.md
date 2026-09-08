@@ -20,7 +20,11 @@
 得点 = max(0, 100 - |予測人数 - 実際の人数| × 20)
 ```
 
-ぴったり当てると100点、1人ずれるごとに20点減点。
+ぴったり当てると100点、1人ずれるごとに20点減点。実装は Android（`android/.../game/GameLogic.kt`）・
+Web（`backend/web/game_logic.js`）・Cloud Functions（`backend/functions/game_logic.py`）の3箇所にあり、
+採点・集計・累計スコアの**期待値は [`shared/logic_vectors.json`](shared/logic_vectors.json) が単一の正本**です。
+3実装のテスト（`GameLogicTest.kt` / `game_logic.test.mjs` / `test_logic.py`）はいずれもこのファイルを
+読み込んで検証しており、期待値をテストコード内にハードコードしていません（Issue #45）。
 
 ---
 
@@ -126,6 +130,7 @@ npm --prefix rules-tests run test:emulator
   - `./gradlew assembleDebug` — デバッグAPKのビルド（Kotlinのコンパイルエラーもここで検知）
   - `google-services.json` は本番のFirebase値を含むため`.gitignore`対象でリポジトリにコミットされていない。CIでは本番値を含まないダミー（`android/app/google-services.ci.json`）を実際のパスへコピーして使う
 - `backend/test_logic.py`（採点ロジック単体テスト。`backend/functions/game_logic.py` の実装を直接importして検証する）
+- `node --test backend/web/game_logic.test.mjs`（Web採点ロジック単体テスト。`backend/web/game_logic.js` を直接importして検証する。Issue #45）
 - `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
 - `backend/rules-tests/`（Firestoreルールテスト・権限マトリクス32件〔nicknameの検証7件を含む〕＋実ゲームフロー18件、Firebase Emulator上で実行）
 - `backend/test_room_expiry.py`（ルーム保持期限・自動削除のEmulator統合テスト。詳細は下記「ルームの保持期間と自動削除」）
@@ -161,9 +166,14 @@ hitokazu-game/
 │   │   ├── main.py          # Cloud Functions
 │   │   └── game_logic.py    # 採点・集計・フェーズ遷移の純粋関数（backend/test_logic.py が直接import）
 │   └── web/
-│       ├── index.html     # Webクライアント（ブラウザ参加用・ゲーム本体）
+│       ├── index.html          # Webクライアント（ブラウザ参加用・ゲーム本体。UI/Firestore呼び出し）
+│       ├── game_logic.js       # 採点・集計・累計スコアの純粋関数（index.htmlからimport。Issue #45）
+│       ├── game_logic.test.mjs # 上記の単体テスト（node --test）
 │       └── join/
 │           └── index.html # 招待ページ（/join/{roomId}。ルーム確認後ゲーム本体へ遷移）
+├── shared/
+│   ├── questions.json       # 質問マスタ（36問）の単一正本。Kotlin/JS/Pythonへ生成
+│   └── logic_vectors.json   # 採点・集計・累計スコアの期待値の単一正本。Kotlin/JS/Pythonが読み込む（Issue #45）
 └── docs/                  # 仕様・要件（バックログは GitHub Issue が正）
 ```
 
