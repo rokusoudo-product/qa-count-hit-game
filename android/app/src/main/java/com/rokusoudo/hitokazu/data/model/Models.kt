@@ -16,10 +16,17 @@ enum class QuestionCategory(val displayName: String, val tags: List<String>) {
 
 // ── API Response Models ───────────────────────────────────────
 
+// 既存メンバーの再入室時、呼び出し元（GameViewModel）が現在のフェーズ画面へ直接
+// 復帰できるよう、参加/再入室時点のルームスナップショットと自分の送信済み回答・予測を
+// 併せて返す（Issue #49）。新規参加時も（statusはWAITING固定の）スナップショットを含める。
 data class JoinRoomResponse(
     val playerId: String,
     val roomId: String,
     val nickname: String,
+    val initialSnapshot: RoomSnapshot? = null,
+    val existingAnswer: String? = null,
+    val existingPrediction: Int? = null,
+    val existingTargetOption: String? = null,
 )
 
 data class Question(

@@ -33,6 +33,19 @@ object Routes {
     const val HOST_LEFT = "host_left"
 }
 
+// 参加・再入室が成功した時点のルーム状態（GamePhase）から、直接遷移すべき画面を決める。
+// 通常の新規参加は常にWAITINGだがWAITING_ROOMへ、既存メンバーの再入室
+// （joinRoom()の再入室分岐・rejoinSavedRoom()）ではANSWERING/PREDICTING/RESULT/FINISHED
+// のいずれの途中でも、待合室を経由せず現在のフェーズ画面へ直接復帰させる（Issue #49）。
+private fun routeForPhase(phase: GamePhase): String = when (phase) {
+    GamePhase.WAITING -> Routes.WAITING_ROOM
+    GamePhase.ANSWERING -> Routes.ANSWERING
+    GamePhase.PREDICTING -> Routes.PREDICTING
+    GamePhase.RESULT -> Routes.RESULT
+    GamePhase.FINISHED -> Routes.FINISHED
+    GamePhase.HOST_LEFT -> Routes.HOST_LEFT
+}
+
 class MainActivity : ComponentActivity() {
 
     private var gameViewModel: GameViewModel? = null
@@ -70,7 +83,14 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 viewModel = vm,
                                 onNavigateToQr = { navController.navigate(Routes.QR_DISPLAY) },
-                                onNavigateToWaiting = { navController.navigate(Routes.WAITING_ROOM) },
+                                onJoinedRoom = { phase ->
+                                    // 通常参加は常にWAITING（=待合室）だが、既存メンバーの再入室では
+                                    // ANSWERING/PREDICTING/RESULT/FINISHEDの現在のフェーズへ直接遷移する
+                                    // （Issue #49）。
+                                    navController.navigate(routeForPhase(phase)) {
+                                        popUpTo(Routes.HOME)
+                                    }
+                                },
                                 onNavigateToScanner = { navController.navigate(Routes.QR_SCANNER) },
                             )
                         }
