@@ -1,11 +1,13 @@
 package com.rokusoudo.hitokazu.viewmodel
 
+import android.app.Application
 import android.util.Log
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rokusoudo.hitokazu.data.firebase.FirebaseRepository
 import com.rokusoudo.hitokazu.data.firebase.PlayersEvent
 import com.rokusoudo.hitokazu.data.firebase.RoomEvent
+import com.rokusoudo.hitokazu.data.local.RoomPrefs
 import com.rokusoudo.hitokazu.data.model.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +34,13 @@ data class GameUiState(
     val selectedCategory: QuestionCategory = QuestionCategory.ALL,
     // Firestoreとの接続が切れている（と判定された）状態。ConnectionBannerの表示制御に使う（Issue #18）。
     val isDisconnected: Boolean = false,
+    // 再入室時に、現在のラウンドで既に送信済みの予測（Issue #49）。
+    // PredictingScreenの初期表示（「予測済み」の直接表示）にのみ使う。新ラウンド開始時にクリアする。
+    val myPrediction: Int? = null,
+    val myTargetOption: String? = null,
+    // 端末に保存された「直近参加していたルームID」。ホーム画面の「ルームXXXXXXXXに戻る」
+    // 導線の表示制御に使う（Issue #49）。ホストとしての参加では保存しない（ホスト復帰はスコープ外）。
+    val savedRoomId: String? = null,
 )
 
 // 回答・予測フェーズのタイムアウト猶予秒数（通信遅延・端末クロックのズレを吸収するバッファ）
@@ -48,10 +57,11 @@ private const val HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECON
 // 代表確認済み: 5秒固定。調整する場合はこの定数のみを変更すればよい（Issue #18）。
 private const val DISCONNECT_THRESHOLD_MS = 5_000L
 
-class GameViewModel : ViewModel() {
+class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = FirebaseRepository()
-    private val _uiState = MutableStateFlow(GameUiState())
+    private val roomPrefs = RoomPrefs(application)
+    private val _uiState = MutableStateFlow(GameUiState(savedRoomId = roomPrefs.load()))
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
 
     private var roomObserverJob: Job? = null
@@ -129,32 +139,84 @@ class GameViewModel : ViewModel() {
     }
 
     // ── ルーム参加（参加者） ──────────────────────────────────
+    // players/{uid}が既に存在するルームの場合はrepo側で「再入室」として扱われ、
+    // 現在のフェーズ・既存の回答/予測がresに含まれる（Issue #49）。
     fun joinRoom(roomId: String, nickname: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             repo.joinRoom(roomId, nickname)
-                .onSuccess { res ->
-                    _uiState.update {
-                        it.copy(
-                            roomId = res.roomId,
-                            playerId = res.playerId,
-                            nickname = res.nickname,
-                            isHost = false,
-                        )
-                    }
-                    startObserving(res.roomId)
-                }
+                .onSuccess { res -> applyJoinResult(res) }
                 .onFailure { e ->
                     val msg = when {
                         e.message?.contains("見つかりません") == true -> "ルームが見つかりません"
                         e.message?.contains("開始されています") == true -> "ゲームはすでに開始されています"
                         e.message?.contains("満員") == true -> "ルームが満員です"
+                        e.message?.contains("ホストの復帰") == true -> e.message!!
                         else -> "参加に失敗しました: ${e.message}"
                     }
                     _uiState.update { it.copy(errorMessage = msg) }
                 }
             _uiState.update { it.copy(isLoading = false) }
         }
+    }
+
+    // ── ルーム再入室（ホーム画面の「ルームXXXXXXXXに戻る」から呼び出す） ──
+    // アプリ再起動・クラッシュ後、端末に保存されたルームIDを使って復帰する（Issue #49）。
+    // 参加者として登録されていない（players/{uid}が無い）場合は新規参加へフォールバックせず
+    // 失敗させ、保存済みルームIDを破棄する（ホーム画面から復帰導線を消す）。
+    fun rejoinSavedRoom() {
+        val roomId = _uiState.value.savedRoomId ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            repo.rejoinRoom(roomId)
+                .onSuccess { res -> applyJoinResult(res) }
+                .onFailure { e ->
+                    Log.e("GameViewModel", "rejoinSavedRoom failed", e)
+                    roomPrefs.clear()
+                    _uiState.update {
+                        it.copy(
+                            savedRoomId = null,
+                            errorMessage = "ルームへの復帰に失敗しました: ${e.message}",
+                        )
+                    }
+                }
+            _uiState.update { it.copy(isLoading = false) }
+        }
+    }
+
+    // ── 保存済みルームIDの復帰導線を明示的に消す（ユーザーが「戻らない」を選んだ場合） ──
+    fun dismissSavedRoom() {
+        roomPrefs.clear()
+        _uiState.update { it.copy(savedRoomId = null) }
+    }
+
+    // joinRoom()/rejoinSavedRoom()の成功時に共通する状態反映処理。
+    // res.initialSnapshotには、参加/再入室時点のルーム状態が同期的に含まれているため、
+    // observeRoomの最初のスナップショット到達を待たずに現在のフェーズへ直接遷移できる（Issue #49）。
+    private fun applyJoinResult(res: JoinRoomResponse) {
+        val snap = res.initialSnapshot
+        _uiState.update { state ->
+            state.copy(
+                roomId = res.roomId,
+                playerId = res.playerId,
+                nickname = res.nickname,
+                isHost = false,
+                phase = snap?.status ?: state.phase,
+                currentRound = snap?.currentRound ?: state.currentRound,
+                totalRounds = snap?.totalRounds ?: state.totalRounds,
+                currentQuestion = snap?.currentQuestion ?: state.currentQuestion,
+                answerCounts = snap?.answerCounts ?: state.answerCounts,
+                scores = when (snap?.status) {
+                    null -> state.scores
+                    GamePhase.FINISHED -> snap.finalScores
+                    else -> snap.roundScores
+                },
+                selectedAnswer = res.existingAnswer ?: "",
+                myPrediction = res.existingPrediction,
+                myTargetOption = res.existingTargetOption,
+            )
+        }
+        startObserving(res.roomId)
     }
 
     // ── ゲーム開始（ホストのみ） ──────────────────────────────
@@ -232,6 +294,10 @@ class GameViewModel : ViewModel() {
                         }
 
                         _uiState.update { state ->
+                            // 新しいANSWERINGラウンドに入ったら、前ラウンドの送信済み回答・予測
+                            // （再入室時のブートストラップ含む）を持ち越さずクリアする（Issue #49）。
+                            val isNewAnsweringRound = snapshot.status == GamePhase.ANSWERING &&
+                                snapshot.currentRound != state.currentRound
                             state.copy(
                                 phase = snapshot.status,
                                 currentRound = snapshot.currentRound,
@@ -242,10 +308,24 @@ class GameViewModel : ViewModel() {
                                     GamePhase.FINISHED -> snapshot.finalScores
                                     else -> snapshot.roundScores
                                 },
-                                selectedAnswer = if (snapshot.status == GamePhase.ANSWERING &&
-                                    snapshot.currentRound != state.currentRound
-                                ) "" else state.selectedAnswer,
+                                selectedAnswer = if (isNewAnsweringRound) "" else state.selectedAnswer,
+                                myPrediction = if (isNewAnsweringRound) null else state.myPrediction,
+                                myTargetOption = if (isNewAnsweringRound) null else state.myTargetOption,
                             )
+                        }
+
+                        // 直近参加していたルームIDを端末に保存する（参加者のみ。Issue #49）。
+                        // ゲーム終了・ホスト離脱で確定したら、以後の復帰導線を出さないよう破棄する。
+                        if (!_uiState.value.isHost) {
+                            if (snapshot.status == GamePhase.FINISHED || snapshot.status == GamePhase.HOST_LEFT) {
+                                if (roomPrefs.load() != null) {
+                                    roomPrefs.clear()
+                                    _uiState.update { it.copy(savedRoomId = null) }
+                                }
+                            } else if (roomPrefs.load() != roomId) {
+                                roomPrefs.save(roomId)
+                                _uiState.update { it.copy(savedRoomId = roomId) }
+                            }
                         }
 
                         // ホストがRESULTを検知したら10秒後に次ラウンドへ自動進行
@@ -410,6 +490,8 @@ class GameViewModel : ViewModel() {
     // ホストはここでは削除しない（ホスト離脱はハートビート停止検知の経路に一本化する）。
     fun resetGame() {
         val state = _uiState.value
+        // 明示的な離脱なので、以後の「ルームXXXXXXXXに戻る」導線も破棄する（Issue #49）。
+        roomPrefs.clear()
         if (!state.isHost && state.roomId.isNotEmpty() && state.playerId.isNotEmpty()) {
             val roomId = state.roomId
             val playerId = state.playerId

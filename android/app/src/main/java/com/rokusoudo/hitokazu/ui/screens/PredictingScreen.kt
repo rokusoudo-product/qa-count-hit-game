@@ -28,8 +28,12 @@ fun PredictingScreen(
     val totalPlayers = uiState.players.size
 
     val selectedOption = "はい"
-    var predictedCountStr by remember { mutableStateOf("") }
-    var submitted by remember { mutableStateOf(false) }
+    // 再入室時にすでに予測送信済みの場合、uiState.myPredictionが初期値として入っている。
+    // remember{}は初回コンポジション時にのみ評価されるため、新ラウンドで再コンポジション
+    // されるたび（GameViewModel側でmyPredictionはラウンド変化時にnullへクリアされる）に
+    // 正しく未送信状態へ戻る（Issue #49）。
+    var predictedCountStr by remember { mutableStateOf(uiState.myPrediction?.toString() ?: "") }
+    var submitted by remember { mutableStateOf(uiState.myPrediction != null) }
 
     LaunchedEffect(uiState.phase) {
         if (uiState.phase == GamePhase.RESULT || uiState.phase == GamePhase.FINISHED) onResult()

@@ -119,6 +119,13 @@
 
   <!-- ホーム画面 -->
   <div id="screen-home" class="screen active">
+    <!-- 直近参加していたルームへの復帰導線（Issue #49）。playersドキュメントが残っている
+         間だけ意味を持つため、実際に復帰できるかはrejoinLastRoom()内でその都度確認する。 -->
+    <div id="rejoin-banner" class="score-card" style="display:none;margin-bottom:16px">
+      <p class="info" style="margin-bottom:8px">前回参加していたルームがあります</p>
+      <button class="btn-primary" id="rejoin-btn" onclick="rejoinLastRoom()"></button>
+      <button class="btn-secondary" onclick="dismissRejoinPrompt()">このルームを表示しない</button>
+    </div>
     <div id="home-error" class="error" style="display:none"></div>
     <input id="nickname" type="text" placeholder="ニックネーム" maxlength="20">
     <input id="room-id-input" type="text" placeholder="ルームID（参加する場合）" maxlength="10" style="text-transform:uppercase">
@@ -249,6 +256,19 @@
     return new Date(Date.now() + hours * 60 * 60 * 1000);
   }
 
+  // 直近参加していたルームIDをブラウザに保存するためのキー（Issue #49）。
+  const LAST_ROOM_STORAGE_KEY = 'hitokazu_last_room_id';
+
+  function saveLastRoom(roomId) {
+    try { localStorage.setItem(LAST_ROOM_STORAGE_KEY, roomId); } catch (err) { /* private mode等は無視 */ }
+  }
+  function loadLastRoom() {
+    try { return localStorage.getItem(LAST_ROOM_STORAGE_KEY); } catch (err) { return null; }
+  }
+  function clearLastRoom() {
+    try { localStorage.removeItem(LAST_ROOM_STORAGE_KEY); } catch (err) { /* private mode等は無視 */ }
+  }
+
   let state = {
     uid: null,
     roomId: null,
@@ -256,6 +276,9 @@
     nickname: '',
     selectedAnswer: null,
     predictionSent: false,
+    // 再入室時に、現在のラウンドで既に送信済みの予測（Issue #49）。
+    // 新ラウンド開始時（phase==='ANSWERING'かつラウンドが変わった時）にクリアする。
+    myPrediction: null,
     currentPhase: null,
     currentRound: 0,
     roomUnsub: null,
@@ -270,6 +293,10 @@
     lastScheduledTimeoutKey: null,
     // 直近でホスト離脱監視をスケジュールしたhostHeartbeatAtの値（ミリ秒）。
     lastScheduledHeartbeatAt: null,
+    // 直前のenterRoom()が既存メンバーの再入室だったかどうか（Issue #49）。
+    // trueの間だけ、ANSWERING突入時の「送信済み回答/予測のクリア」処理をスキップし、
+    // primeExistingSubmission()で復元した値を最初のレンダリングに反映させる。
+    justRejoined: false,
   };
 
   // 匿名認証
@@ -291,6 +318,10 @@
     document.getElementById('room-id-input').value = inviteRoomId.toUpperCase();
     document.getElementById('nickname').value = inviteNickname;
     joinRoom();
+  } else {
+    // 招待リンク経由でなければ、直近参加していたルームへの復帰導線を出す（Issue #49）。
+    const lastRoomId = loadLastRoom();
+    if (lastRoomId) showRejoinPrompt(lastRoomId);
   }
 
   // グローバル関数
@@ -303,6 +334,19 @@
   window.submitPrediction = submitPrediction;
   window.resetGame = resetGame;
   window.restartGame = restartGame;
+  window.rejoinLastRoom = rejoinLastRoom;
+  window.dismissRejoinPrompt = dismissRejoinPrompt;
+
+  function showRejoinPrompt(roomId) {
+    const btn = document.getElementById('rejoin-btn');
+    btn.textContent = `ルーム ${roomId} に戻る`;
+    document.getElementById('rejoin-banner').style.display = 'block';
+  }
+
+  function dismissRejoinPrompt() {
+    clearLastRoom();
+    document.getElementById('rejoin-banner').style.display = 'none';
+  }
 
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -369,26 +413,126 @@
     enterRoom();
   }
 
+  // players/{uid}が既に存在する場合は「既存メンバーの再入室」として扱い、statusを問わず
+  // 入室を許可する。ドキュメントは再作成せず参加人数も増やさない（第三者の途中参加は
+  // 従来どおりstatus !== 'WAITING'で拒否する。Android FirebaseRepository.joinRoom()と
+  // 同一の判定条件にすること。Issue #49）。
   async function joinRoom() {
-    const nickname = document.getElementById('nickname').value.trim();
+    const nicknameInput = document.getElementById('nickname').value.trim();
     const roomId = document.getElementById('room-id-input').value.trim().toUpperCase();
-    if (!nickname) return showError('home-error', 'ニックネームを入力してください');
+    if (!nicknameInput) return showError('home-error', 'ニックネームを入力してください');
     if (!roomId) return showError('home-error', 'ルームIDを入力してください');
     hideError('home-error');
 
-    const roomSnap = await getDoc(doc(db, 'rooms', roomId));
+    const roomRef = doc(db, 'rooms', roomId);
+    const roomSnap = await getDoc(roomRef);
     if (!roomSnap.exists()) return showError('home-error', 'ルームが見つかりません');
-    if (roomSnap.data().status !== 'WAITING') return showError('home-error', 'ゲームはすでに開始されています');
+    const roomData = roomSnap.data();
+
+    const existingPlayer = await getExistingPlayer(roomId);
+    if (existingPlayer) {
+      if (existingPlayer.isHost) return showError('home-error', 'ホストの復帰には対応していません');
+      state.nickname = existingPlayer.nickname || nicknameInput;
+      await enterAsExistingMember(roomId, roomRef, roomData, existingPlayer);
+      return;
+    }
+
+    if (roomData.status !== 'WAITING') return showError('home-error', 'ゲームはすでに開始されています');
 
     state.roomId = roomId;
     state.isHost = false;
-    state.nickname = nickname;
+    state.nickname = nicknameInput;
 
     await setDoc(doc(db, 'rooms', roomId, 'players', state.uid), {
-      nickname, isHost: false, joinedAt: serverTimestamp(),
+      nickname: nicknameInput, isHost: false, joinedAt: serverTimestamp(),
     });
 
     enterRoom();
+  }
+
+  // players/{uid}を読む。フレッシュな参加者はまだ自分のplayersドキュメントが存在せず、
+  // Firestoreルール上isPlayer(roomId)がfalseのためこの読み取り自体が権限エラーになりうる。
+  // その場合は「既存メンバーではない」として扱う（Issue #49）。
+  async function getExistingPlayer(roomId) {
+    try {
+      const snap = await getDoc(doc(db, 'rooms', roomId, 'players', state.uid));
+      return snap.exists() ? snap.data() : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // 既存メンバーとしてルームへ入る共通処理（joinRoom()の再入室分岐・rejoinLastRoom()から
+  // 呼ばれる）。現在のフェーズで既に送信済みの回答・予測があれば復元してから入室する。
+  async function enterAsExistingMember(roomId, roomRef, roomData, existingPlayer) {
+    state.roomId = roomId;
+    state.isHost = false;
+    state.nickname = existingPlayer.nickname || state.nickname || '';
+    await primeExistingSubmission(roomRef, roomData);
+    enterRoom();
+  }
+
+  // 再入室時、現在のラウンドで既に回答・予測を送信済みなら再入力を求めないために取得する
+  // （Issue #49）。ANSWERING/PREDICTING以外のフェーズでは入力の余地がないため取得しない。
+  async function primeExistingSubmission(roomRef, roomData) {
+    state.selectedAnswer = null;
+    state.predictionSent = false;
+    state.myPrediction = null;
+    state.justRejoined = true;
+
+    const status = roomData.status;
+    if (status !== 'ANSWERING' && status !== 'PREDICTING') return;
+
+    const roundId = roundDocId(roomData.gameCount, roomData.currentRound);
+    try {
+      const answerSnap = await getDoc(doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid));
+      if (answerSnap.exists()) {
+        const a = answerSnap.data();
+        if (a.answer) state.selectedAnswer = a.answer;
+        if (a.prediction !== undefined) {
+          state.predictionSent = true;
+          state.myPrediction = a.prediction;
+        }
+      }
+    } catch (err) {
+      console.error('primeExistingSubmission failed', err);
+    }
+  }
+
+  // ── ルーム再入室（ホーム画面の「ルームXXXXXXXXに戻る」から呼び出す） ──
+  // ブラウザに保存されたルームIDを使って復帰する（Issue #49）。参加者として
+  // 登録されていない（players/{uid}が無い）場合は新規参加へフォールバックせず、
+  // 保存済みルームIDを破棄してエラーを表示する。
+  async function rejoinLastRoom() {
+    const roomId = loadLastRoom();
+    if (!roomId) return;
+    hideError('home-error');
+
+    const roomRef = doc(db, 'rooms', roomId);
+    let roomSnap;
+    try {
+      roomSnap = await getDoc(roomRef);
+    } catch (err) {
+      dismissRejoinPrompt();
+      return showError('home-error', 'ルームへの復帰に失敗しました');
+    }
+    if (!roomSnap.exists()) {
+      dismissRejoinPrompt();
+      return showError('home-error', 'ルームが見つかりません');
+    }
+    const roomData = roomSnap.data();
+
+    const existingPlayer = await getExistingPlayer(roomId);
+    if (!existingPlayer) {
+      dismissRejoinPrompt();
+      return showError('home-error', '参加者として登録されていません');
+    }
+    if (existingPlayer.isHost) {
+      dismissRejoinPrompt();
+      return showError('home-error', 'ホストの復帰には対応していません');
+    }
+
+    await enterAsExistingMember(roomId, roomRef, roomData, existingPlayer);
   }
 
   // ── ルーム退室（参加者が明示的に呼び出す） ─────────────
@@ -408,6 +552,10 @@
   }
 
   function enterRoom() {
+    // 直近参加していたルームIDを保存する（参加者のみ。ホスト復帰はスコープ外。Issue #49）。
+    if (!state.isHost) saveLastRoom(state.roomId);
+    document.getElementById('rejoin-banner').style.display = 'none';
+
     document.getElementById('display-room-id').textContent = state.roomId;
     document.getElementById('host-controls').style.display = state.isHost ? 'block' : 'none';
     document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
@@ -527,12 +675,25 @@
       }
 
       if (phase === state.currentPhase && data.currentRound === state.currentRound) return;
+      // 再入室直後の最初のスナップショットでは、primeExistingSubmission()で復元した
+      // 送信済み回答/予測をANSWERING分岐のリセットで消してしまわないようにする（Issue #49）。
+      const wasJustRejoined = state.justRejoined;
+      state.justRejoined = false;
       state.currentPhase = phase;
       state.currentRound = data.currentRound;
 
+      // 直近参加していたルームIDは、ゲーム終了・ホスト離脱が確定したら破棄する
+      // （参加者のみ。以後の復帰導線を出さないようにするため。Issue #49）。
+      if (!state.isHost && (phase === 'FINISHED' || phase === 'HOST_LEFT')) {
+        clearLastRoom();
+      }
+
       if (phase === 'ANSWERING') {
-        state.selectedAnswer = null;
-        state.predictionSent = false;
+        if (!wasJustRejoined) {
+          state.selectedAnswer = null;
+          state.predictionSent = false;
+          state.myPrediction = null;
+        }
         renderAnswering(data);
       } else if (phase === 'PREDICTING') {
         renderPredicting(data);
@@ -669,12 +830,22 @@
     const q = data.currentQuestion;
     document.getElementById('answer-round').textContent = `第${data.currentRound}問 / 全${data.totalRounds}問`;
     document.getElementById('answer-question').textContent = q.text;
-    document.getElementById('answer-sent').style.display = 'none';
 
     const btns = document.getElementById('answer-buttons');
     btns.innerHTML = q.options.map(opt =>
       `<button class="btn-answer" onclick="submitAnswer('${opt}')">${opt}</button>`
     ).join('');
+
+    // 再入室時に既に回答送信済みの場合、再入力を求めず送信済みの状態を直接表示する（Issue #49）。
+    if (state.selectedAnswer) {
+      document.querySelectorAll('.btn-answer').forEach(b => {
+        b.disabled = true;
+        if (b.textContent === state.selectedAnswer) b.classList.add('selected');
+      });
+      document.getElementById('answer-sent').style.display = 'block';
+    } else {
+      document.getElementById('answer-sent').style.display = 'none';
+    }
     showScreen('answering');
   }
 
@@ -741,19 +912,28 @@
     const q = data.currentQuestion;
     document.getElementById('predict-round').textContent = `第${data.currentRound}問 / 全${data.totalRounds}問`;
     document.getElementById('predict-question').textContent = q.text;
-    document.getElementById('predict-sent').style.display = 'none';
 
+    // 再入室時に既に予測送信済みなら、その値を入力欄へ復元する（Issue #49）。
+    const prefill = state.myPrediction != null ? state.myPrediction : 0;
     const opts = document.getElementById('predict-options');
     opts.innerHTML = `
       <div style="margin-bottom:16px">
         <p style="margin-bottom:6px;font-weight:bold">「はい」を選んだ人は何人？</p>
         <div class="predict-input">
-          <input type="number" id="pred-はい" min="0" max="20" value="0" style="width:80px">
+          <input type="number" id="pred-はい" min="0" max="20" value="${prefill}" style="width:80px">
           <span>人</span>
           <button class="btn-primary" style="width:auto;padding:10px 16px" onclick="submitPrediction('はい', parseInt(document.getElementById('pred-はい').value))">送信</button>
         </div>
       </div>
     `;
+
+    // 再入室時に既に予測送信済みの場合、再入力を求めず送信済みの状態を直接表示する（Issue #49）。
+    if (state.predictionSent) {
+      document.querySelectorAll('#predict-options input, #predict-options button').forEach(el => el.disabled = true);
+      document.getElementById('predict-sent').style.display = 'block';
+    } else {
+      document.getElementById('predict-sent').style.display = 'none';
+    }
     showScreen('predicting');
   }
 
@@ -1019,6 +1199,9 @@
   // 自分のplayersドキュメントをFirestoreから削除する（Issue #33）。
   // ホストはここでは削除しない（ホスト離脱はハートビート停止検知の経路に一本化する）。
   function resetGame() {
+    // 明示的な離脱なので、以後の「ルームXXXXXXXXに戻る」導線も破棄する（Issue #49）。
+    clearLastRoom();
+
     if (!state.isHost) {
       leaveRoom();
     }
@@ -1031,9 +1214,11 @@
     clearInterval(state.hostHeartbeatInterval);
     clearTimeout(state.hostLeftCheckTimer);
     state = { ...state, roomId: null, isHost: false, nickname: '', selectedAnswer: null,
-      predictionSent: false, currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null,
+      predictionSent: false, myPrediction: null, justRejoined: false,
+      currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null,
       answeringTimeoutTimer: null, predictingTimeoutTimer: null, lastScheduledTimeoutKey: null,
       hostHeartbeatInterval: null, hostLeftCheckTimer: null, lastScheduledHeartbeatAt: null };
+    document.getElementById('rejoin-banner').style.display = 'none';
     showScreen('home');
   }
 </script>

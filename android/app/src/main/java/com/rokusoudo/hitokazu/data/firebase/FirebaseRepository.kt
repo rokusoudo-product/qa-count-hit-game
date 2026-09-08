@@ -100,6 +100,9 @@ class FirebaseRepository {
     }
 
     // ── ルーム参加 ──────────────────────────────────────────
+    // players/{uid} が既に存在する場合は「既存メンバーの再入室」として扱い、
+    // status を問わず入室を許可する。ドキュメントは再作成せず参加人数も増やさない
+    // （第三者の途中参加は従来どおり status != WAITING で拒否する。Issue #49）。
     suspend fun joinRoom(roomId: String, nickname: String): Result<JoinRoomResponse> = runCatching {
         ensureSignedIn()
         val uid = auth.currentUser!!.uid
@@ -108,14 +111,24 @@ class FirebaseRepository {
         val room = roomRef.get().await()
 
         if (!room.exists()) error("ルームが見つかりません")
-
         val roomData = room.data ?: error("ルームが見つかりません")
+
+        val playerRef = roomRef.collection("players").document(uid)
+        // フレッシュな参加者はまだ自分のplayersドキュメントが存在せず、Firestoreルール上
+        // isPlayer(roomId) が false のためこの読み取り自体がPERMISSION_DENIEDになりうる。
+        // その場合は「既存メンバーではない」として扱い、以降の新規参加フローへ進む。
+        val existingPlayer = runCatching { playerRef.get().await() }.getOrNull()?.takeIf { it.exists() }
+
+        if (existingPlayer != null) {
+            return@runCatching buildRejoinResponse(roomRef, roomId, roomData, uid, existingPlayer, nickname)
+        }
+
         if (roomData["status"] != "WAITING") error("ゲームはすでに開始されています")
 
         val players = roomRef.collection("players").get().await()
         if (players.size() >= 20) error("ルームが満員です")
 
-        roomRef.collection("players").document(uid).set(
+        playerRef.set(
             mapOf(
                 "nickname" to nickname,
                 "isHost" to false,
@@ -123,7 +136,80 @@ class FirebaseRepository {
             )
         ).await()
 
-        JoinRoomResponse(playerId = uid, roomId = roomId, nickname = nickname)
+        JoinRoomResponse(
+            playerId = uid,
+            roomId = roomId,
+            nickname = nickname,
+            initialSnapshot = RoomSnapshot.fromMap(roomData),
+        )
+    }
+
+    // ── ルーム再入室（起動時の「ルームXXXXXXXXに戻る」導線から呼び出す） ──
+    // joinRoom() と異なり、players/{uid} が存在しない場合は新規参加へフォールバックせず
+    // 失敗させる（ニックネーム入力を経由していないため、意図せず新規参加者として
+    // 登録してしまうことを避ける。呼び出し側でエラー時に保存済みルームIDを破棄する）。
+    suspend fun rejoinRoom(roomId: String): Result<JoinRoomResponse> = runCatching {
+        ensureSignedIn()
+        val uid = auth.currentUser!!.uid
+
+        val roomRef = db.collection("rooms").document(roomId)
+        val room = roomRef.get().await()
+        if (!room.exists()) error("ルームが見つかりません")
+        val roomData = room.data ?: error("ルームが見つかりません")
+
+        val existingPlayer = runCatching { roomRef.collection("players").document(uid).get().await() }
+            .getOrNull()?.takeIf { it.exists() } ?: error("参加者として登録されていません")
+
+        buildRejoinResponse(roomRef, roomId, roomData, uid, existingPlayer, nickname = null)
+    }
+
+    // joinRoom()の既存メンバー分岐とrejoinRoom()で共有するレスポンス組み立て処理。
+    // ホストの復帰は本Issueのスコープ外のため明示的に拒否する（別Issueで扱う）。
+    private suspend fun buildRejoinResponse(
+        roomRef: com.google.firebase.firestore.DocumentReference,
+        roomId: String,
+        roomData: Map<String, Any>,
+        uid: String,
+        existingPlayer: com.google.firebase.firestore.DocumentSnapshot,
+        nickname: String?,
+    ): JoinRoomResponse {
+        if (existingPlayer.getBoolean("isHost") == true) {
+            error("ホストの復帰には対応していません")
+        }
+        val existingNickname = existingPlayer.getString("nickname") ?: nickname ?: ""
+        val snapshot = RoomSnapshot.fromMap(roomData)
+        val (existingAnswer, existingPrediction, existingTargetOption) = fetchMySubmission(roomRef, roomData, uid)
+        return JoinRoomResponse(
+            playerId = uid,
+            roomId = roomId,
+            nickname = existingNickname,
+            initialSnapshot = snapshot,
+            existingAnswer = existingAnswer,
+            existingPrediction = existingPrediction,
+            existingTargetOption = existingTargetOption,
+        )
+    }
+
+    // 再入室時、現在のラウンドで既に回答・予測を送信済みなら再入力を求めないために取得する
+    // （Issue #49）。ANSWERING/PREDICTING以外のフェーズでは入力の余地がないため取得しない。
+    private suspend fun fetchMySubmission(
+        roomRef: com.google.firebase.firestore.DocumentReference,
+        roomData: Map<String, Any>,
+        uid: String,
+    ): Triple<String?, Int?, String?> {
+        val status = roomData["status"] as? String
+        if (status != "ANSWERING" && status != "PREDICTING") return Triple(null, null, null)
+
+        val currentRound = (roomData["currentRound"] as? Long)?.toInt() ?: return Triple(null, null, null)
+        val gameCount = (roomData["gameCount"] as? Long) ?: 1L
+        val answerDoc = roomRef.collection("rounds").document(roundDocId(gameCount, currentRound))
+            .collection("answers").document(uid).get().await()
+
+        if (!answerDoc.exists()) return Triple(null, null, null)
+        val answer = answerDoc.getString("answer")
+        val prediction = answerDoc.getLong("prediction")?.toInt()
+        val targetOption = answerDoc.getString("targetOption")
+        return Triple(answer, prediction, targetOption)
     }
 
     // ── ルーム退室（参加者が明示的に呼び出す） ─────────────

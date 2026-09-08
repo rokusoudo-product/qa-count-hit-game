@@ -12,6 +12,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rokusoudo.hitokazu.data.model.GamePhase
 import com.rokusoudo.hitokazu.data.model.QuestionCategory
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
@@ -19,7 +20,7 @@ import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 fun HomeScreen(
     viewModel: GameViewModel,
     onNavigateToQr: () -> Unit,
-    onNavigateToWaiting: () -> Unit,
+    onJoinedRoom: (GamePhase) -> Unit,
     onNavigateToScanner: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -45,10 +46,10 @@ fun HomeScreen(
             onNavigateToQr()
         }
     }
-    // 参加成功→待合室へ
-    LaunchedEffect(uiState.roomId) {
+    // 参加・再入室成功→現在のフェーズ画面へ（新規参加は常にWAITING=待合室。Issue #49）
+    LaunchedEffect(uiState.roomId, uiState.phase) {
         if (uiState.roomId.isNotEmpty() && !uiState.isHost) {
-            onNavigateToWaiting()
+            onJoinedRoom(uiState.phase)
         }
     }
 
@@ -70,8 +71,43 @@ fun HomeScreen(
             text = "みんなの回答を予測しよう！",
             fontSize = 16.sp,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            modifier = Modifier.padding(top = 8.dp, bottom = 48.dp),
+            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
         )
+
+        // 直近参加していたルームへの復帰導線（Issue #49）。
+        // アプリのタスクキル・再起動後、players/{uid}が残っている間だけ表示する。
+        uiState.savedRoomId?.let { savedRoomId ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "前回参加していたルームがあります",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { viewModel.rejoinSavedRoom() },
+                        enabled = !uiState.isLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("ルーム $savedRoomId に戻る", fontSize = 16.sp)
+                    }
+                    TextButton(
+                        onClick = { viewModel.dismissSavedRoom() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("このルームを表示しない", fontSize = 13.sp)
+                    }
+                }
+            }
+        }
 
         Button(
             onClick = { showCreateDialog = true },
