@@ -78,6 +78,31 @@
     .btn-answer { background: var(--color-primary); color: white; font-size: 18px; padding: 18px; }
     .btn-answer.selected { background: var(--color-secondary); }
     .error { color: var(--color-error); font-size: 14px; margin-bottom: 8px; padding: 8px; background: var(--color-error-bg); border-radius: 8px; }
+    /* 接続断バナー（Issue #51: Android ConnectionBanner.kt のパリティ）。
+       全画面共通のヘッダ位置（h1の直下）に表示する。配色はDESIGN.mdのトークン
+       --color-error / --color-error-bg を使い、直書きしない。 */
+    .connection-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--color-error);
+      font-size: 14px;
+      background: var(--color-error-bg);
+      border-radius: 8px;
+      padding: 8px 8px 8px 12px;
+      margin-bottom: 16px;
+    }
+    .connection-banner .btn-reconnect {
+      width: auto;
+      margin-bottom: 0;
+      padding: 6px 12px;
+      background: none;
+      color: var(--color-error);
+      font-size: 14px;
+      font-weight: bold;
+      text-decoration: underline;
+    }
     .info { color: var(--color-text-secondary); font-size: 14px; margin-bottom: 16px; }
     .player-list { list-style: none; }
     .player-list li { padding: 10px; border-bottom: 1px solid var(--color-divider); font-size: 15px; }
@@ -116,6 +141,14 @@
 <body>
 <div class="container">
   <h1>人数当てゲーム</h1>
+
+  <!-- 接続断バナー（Issue #51: Android GameViewModel.kt isDisconnected / ConnectionBanner.kt のパリティ）。
+       全画面共通のヘッダ位置に表示し、room / players のいずれかの接続が切れている間、
+       または navigator.onLine がfalseの間、表示する。 -->
+  <div id="connection-banner" class="connection-banner">
+    <span>接続が切れました</span>
+    <button type="button" class="btn-reconnect" onclick="reconnectConnection()">再接続</button>
+  </div>
 
   <!-- ホーム画面 -->
   <div id="screen-home" class="screen active">
@@ -218,7 +251,7 @@
   import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
   import {
     getFirestore, doc, collection, setDoc, updateDoc, getDoc, getDocs,
-    onSnapshot, serverTimestamp, increment, deleteField, deleteDoc
+    onSnapshot, serverTimestamp, increment, deleteField, deleteDoc, enableNetwork
   } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
   const app = initializeApp({
@@ -242,6 +275,73 @@
   // Firestore無料枠（書き込み2万回/日）に対して十分小さい（Issue #15）。
   const HOST_HEARTBEAT_INTERVAL_SECONDS = 15;
   const HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECONDS * 3;
+
+  // ── 接続状態の監視（Issue #51: Android GameViewModel.kt Issue #18 のパリティ） ──
+  // room / players それぞれのリスナーについて、サーバー由来ではなくキャッシュ由来の
+  // データ（snapshot.metadata.fromCache === true）が DISCONNECT_THRESHOLD_MS 続いたら
+  // 「切断」とみなす。この値は Android GameViewModel.kt の DISCONNECT_THRESHOLD_MS
+  // （5000ms固定・代表確認済み）と同期対象。変更する場合は両方を揃えること。
+  const DISCONNECT_THRESHOLD_MS = 5000;
+
+  // 切断と判定されているソース（'room' / 'players' / 'network'）の集合。
+  // 空であれば非表示、どれか一つでも切断中ならバナーを表示する。
+  // Android の disconnectedSources（'room' / 'players'）に加えて、Web独自の即時シグナルとして
+  // 'network'（navigator.onLine / online・offlineイベント）を持つ（Issue #51 提案内容1.）。
+  const disconnectedSources = new Set();
+  let roomCacheTimeoutTimer = null;
+  let playersCacheTimeoutTimer = null;
+
+  function updateConnectionBanner() {
+    document.getElementById('connection-banner').style.display =
+      disconnectedSources.size > 0 ? 'flex' : 'none';
+  }
+
+  function markSourceDisconnected(source) {
+    if (!disconnectedSources.has(source)) {
+      disconnectedSources.add(source);
+      updateConnectionBanner();
+    }
+  }
+
+  function markSourceConnected(source) {
+    if (disconnectedSources.delete(source)) {
+      updateConnectionBanner();
+    }
+  }
+
+  // isFromCacheな更新を受けるたびに呼ぶ。「キャッシュ由来が5秒続いたら切断」という仕様なので、
+  // すでに計測中のタイマーがあればそれを流用し、キャッシュ由来の更新が連続するたびに5秒を
+  // 数え直す（＝ずっと切断判定に到達しない）ことを避ける（Android scheduleCacheTimeoutと同じ方針）。
+  function scheduleCacheTimeout(source, existingTimer) {
+    if (existingTimer) return existingTimer;
+    return setTimeout(() => markSourceDisconnected(source), DISCONNECT_THRESHOLD_MS);
+  }
+
+  function clearCacheTimeout(timer) {
+    if (timer) clearTimeout(timer);
+    return null;
+  }
+
+  // ブラウザの online/offline イベントは、Firestoreのキャッシュ判定（最大5秒）より
+  // 速く切断に気づける場合があるため、即座にバナーへ反映する優先シグナルとして扱う
+  // （Issue #51 提案内容1.「navigator.onLineとonline/offlineイベントも購読し、
+  // 即座に反映できる場合はそちらを優先する」）。オンライン復帰時は強制的にバナーを
+  // 消さず、room/playersが実際にサーバー由来のデータを受け取るまで待つ
+  // （切断中に進んだフェーズへの追従を保証するため。復帰を後押しするためenableNetworkは呼ぶ）。
+  // 'network'の付け外しのみを行い、room/playersのキャッシュ監視タイマーには触れない
+  // （Firestoreはfromcacheが変化しない限り新しいスナップショットを発火しないため、
+  // ここでタイマーを止めるとオフラインが続いた場合に再スケジュールされず、
+  // room/playersが「切断」に到達し損ねてしまう）。
+  window.addEventListener('offline', () => {
+    markSourceDisconnected('network');
+  });
+  window.addEventListener('online', () => {
+    markSourceConnected('network');
+    enableNetwork(db).catch(err => console.error('enableNetwork (auto on online event) failed', err));
+  });
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    markSourceDisconnected('network');
+  }
 
   // ── ルームの保持期限（Issue #34） ────────────────────────
   // 終了済み（FINISHED / HOST_LEFT）は終了から24時間、それ以外（作成直後の待合室・
@@ -336,6 +436,7 @@
   window.restartGame = restartGame;
   window.rejoinLastRoom = rejoinLastRoom;
   window.dismissRejoinPrompt = dismissRejoinPrompt;
+  window.reconnectConnection = reconnectConnection;
 
   function showRejoinPrompt(roomId) {
     const btn = document.getElementById('rejoin-btn');
@@ -628,10 +729,27 @@
   }
 
   function startObserving() {
+    // リスナーの張り直し（reconnect含む）のたびに、古い接続監視タイマーも引き継がず
+    // 作り直す。引き継ぐと張り直し直後に古いタイマーが誤発火しうる（Issue #51、
+    // Android GameViewModel.startObserving()と同じ方針）。
+    roomCacheTimeoutTimer = clearCacheTimeout(roomCacheTimeoutTimer);
+    playersCacheTimeoutTimer = clearCacheTimeout(playersCacheTimeoutTimer);
+
     // プレイヤー監視
+    // MetadataChanges.INCLUDE相当（includeMetadataChanges: true）を付けないと、
+    // データ自体に変化がないメタデータのみの遷移（オンライン↔オフライン）では
+    // コールバックが一切呼ばれず、切断検知ができない（Issue #51）。
     state.playersUnsub = onSnapshot(
       collection(db, 'rooms', state.roomId, 'players'),
+      { includeMetadataChanges: true },
       snap => {
+        if (snap.metadata.fromCache) {
+          playersCacheTimeoutTimer = scheduleCacheTimeout('players', playersCacheTimeoutTimer);
+        } else {
+          playersCacheTimeoutTimer = clearCacheTimeout(playersCacheTimeoutTimer);
+          markSourceConnected('players');
+        }
+
         const players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         const list = document.getElementById('player-list');
         list.innerHTML = '';
@@ -651,14 +769,31 @@
           msg.textContent = `参加者 ${players.length}人`;
           document.getElementById('start-btn').disabled = players.length < 1;
         }
+      },
+      error => {
+        // errorはもみ消さず、コンソールへの出力とバナー表示の両方を行う（Issue #51）。
+        console.error('observePlayers snapshot error', error);
+        playersCacheTimeoutTimer = clearCacheTimeout(playersCacheTimeoutTimer);
+        markSourceDisconnected('players');
       }
     );
 
     // ルーム状態監視
-    state.roomUnsub = onSnapshot(doc(db, 'rooms', state.roomId), snap => {
+    // includeMetadataChanges: true の理由はプレイヤー監視と同じ（Issue #51）。
+    state.roomUnsub = onSnapshot(
+      doc(db, 'rooms', state.roomId),
+      { includeMetadataChanges: true },
+      snap => {
       if (!snap.exists()) return;
       const data = snap.data();
       const phase = data.status;
+
+      if (snap.metadata.fromCache) {
+        roomCacheTimeoutTimer = scheduleCacheTimeout('room', roomCacheTimeoutTimer);
+      } else {
+        roomCacheTimeoutTimer = clearCacheTimeout(roomCacheTimeoutTimer);
+        markSourceConnected('room');
+      }
 
       // ホストのタイムアウト監視・ホスト離脱監視は、画面再描画の間引き（下の早期return）とは
       // 独立に毎スナップショットで評価する。serverTimestamp()確定時に発火するスナップショットは
@@ -716,7 +851,29 @@
         document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
         showScreen('waiting');
       }
-    });
+      },
+      error => {
+        console.error('observeRoom snapshot error', error);
+        roomCacheTimeoutTimer = clearCacheTimeout(roomCacheTimeoutTimer);
+        markSourceDisconnected('room');
+      }
+    );
+  }
+
+  // ── 再接続（切断バナーの「再接続」ボタンから呼び出す）(Issue #51) ──
+  // Firestoreのネットワークを明示的に有効化しつつ、room/playersリスナーを張り直す。
+  // Android GameViewModel.reconnect() → FirebaseRepository.enableNetwork() と同じ手順。
+  // 切断中に進んだルーム状態は、張り直し後の最新snapshotで反映される。
+  async function reconnectConnection() {
+    if (!state.roomId) return;
+    try {
+      await enableNetwork(db);
+    } catch (err) {
+      console.error('enableNetwork failed', err);
+    }
+    if (state.roomUnsub) state.roomUnsub();
+    if (state.playersUnsub) state.playersUnsub();
+    startObserving();
   }
 
   // GENERATED:QUESTIONS:START (edit shared/questions.json, then run `python3 scripts/generate_questions.py`)
@@ -1213,6 +1370,13 @@
     clearTimeout(state.predictingTimeoutTimer);
     clearInterval(state.hostHeartbeatInterval);
     clearTimeout(state.hostLeftCheckTimer);
+    // ルーム離脱に伴い、room/playersの切断監視も破棄する（Issue #51）。
+    // 'network'（navigator.onLine由来）はルームに紐づかないグローバルな状態のため保持する。
+    roomCacheTimeoutTimer = clearCacheTimeout(roomCacheTimeoutTimer);
+    playersCacheTimeoutTimer = clearCacheTimeout(playersCacheTimeoutTimer);
+    disconnectedSources.delete('room');
+    disconnectedSources.delete('players');
+    updateConnectionBanner();
     state = { ...state, roomId: null, isHost: false, nickname: '', selectedAnswer: null,
       predictionSent: false, myPrediction: null, justRejoined: false,
       currentPhase: null, currentRound: 0, roomUnsub: null, playersUnsub: null,
