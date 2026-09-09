@@ -243,6 +243,29 @@
   const HOST_HEARTBEAT_INTERVAL_SECONDS = 15;
   const HOST_HEARTBEAT_TIMEOUT_SECONDS = HOST_HEARTBEAT_INTERVAL_SECONDS * 3;
 
+  // 参加人数の上限・開始に必要な最低人数（docs/requirements.md 3.1 / 4節、docs/user_stories.md
+  // US-002）。Android側 GameLogic.MAX_PLAYERS_PER_ROOM / MIN_PLAYERS_TO_START と同一の値にすること
+  // （Issue #50）。
+  const MAX_PLAYERS_PER_ROOM = 20;
+  const MIN_PLAYERS_TO_START = 2;
+
+  // 満員判定・開始可否判定。Firestoreに依存しない純粋関数として切り出しておくことで、
+  // Issue #45（Webロジックの自動テスト導入）でそのままテスト対象にできるようにする（Issue #50）。
+  //
+  // isRoomFull() は現時点で呼び出し箇所がない: joinRoom() から呼ぶには新規参加者が
+  // 自分のplayersドキュメントを作成する前に rooms/{roomId}/players 一覧を読む必要があるが、
+  // firestore.rules の players サブコレクションは isPlayer(roomId)（＝自分のplayersドキュメントが
+  // 既に存在すること）でガードされているため、その時点の新規参加者には読み取り権限がなく
+  // PERMISSION_DENIED になる（rules-tests/rules.test.mjs の「部外者は参加者一覧を読めない」で
+  // 検証済みの挙動と同一）。呼び出しを追加するとWebの新規参加そのものが機能しなくなるため、
+  // ルール変更（代表判断）を待ってから呼び出し箇所を追加する。詳細はIssue #50のコメント参照。
+  function isRoomFull(playerCount) {
+    return playerCount >= MAX_PLAYERS_PER_ROOM;
+  }
+  function canStartGame(playerCount) {
+    return playerCount >= MIN_PLAYERS_TO_START;
+  }
+
   // ── ルームの保持期限（Issue #34） ────────────────────────
   // 終了済み（FINISHED / HOST_LEFT）は終了から24時間、それ以外（作成直後の待合室・
   // 再戦直後・ラウンド確定のたび）は基準時刻から6時間で expireAt を更新する。
@@ -439,6 +462,10 @@
 
     if (roomData.status !== 'WAITING') return showError('home-error', 'ゲームはすでに開始されています');
 
+    // 満員判定（isRoomFull）は未実装: 新規参加者は自分のplayersドキュメント作成前で
+    // firestore.rules 上 rooms/{roomId}/players を読む権限がなく、ここで呼ぶと
+    // 全ての新規参加が失敗する。上記 isRoomFull() のコメント・Issue #50 のコメント参照。
+
     state.roomId = roomId;
     state.isHost = false;
     state.nickname = nicknameInput;
@@ -536,8 +563,9 @@
   }
 
   // ── ルーム退室（参加者が明示的に呼び出す） ─────────────
-  // rooms/{roomId}/players/{uid} を削除する。待合室の参加者一覧・満員判定（joinRoom）・
+  // rooms/{roomId}/players/{uid} を削除する。待合室の参加者一覧・
   // 全員提出判定（submitAnswer/submitPrediction の players.size）から即座に外れる（Issue #33）。
+  // 満員判定（isRoomFull）は joinRoom() から未呼び出しのため対象外（Issue #50。上記 isRoomFull() 参照）。
   // ホストの離脱はこの経路では扱わない（呼び出し元でstate.isHostのときは呼ばない。
   // ホスト離脱はハートビート停止検知でルームごと終了させるため、二重の仕組みにしない）。
   // 送信済みの回答・予測（rounds/{gameCount}_{round}/answers/{uid}）は意図的に削除しない
@@ -649,7 +677,12 @@
         if (state.isHost) {
           const msg = document.getElementById('player-count-msg');
           msg.textContent = `参加者 ${players.length}人`;
-          document.getElementById('start-btn').disabled = players.length < 1;
+          const startBtn = document.getElementById('start-btn');
+          const canStart = canStartGame(players.length);
+          startBtn.disabled = !canStart;
+          startBtn.textContent = canStart
+            ? `ゲームを開始する (${players.length}人)`
+            : `あと${MIN_PLAYERS_TO_START - players.length}人必要`;
         }
       }
     );
