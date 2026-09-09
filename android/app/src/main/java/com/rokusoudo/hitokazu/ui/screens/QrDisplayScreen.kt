@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.rokusoudo.hitokazu.data.model.GamePhase
+import com.rokusoudo.hitokazu.game.GameLogic
 import com.rokusoudo.hitokazu.viewmodel.GameViewModel
 
 // Firebase Hosting の配信ドメイン（README のアクセスURLと同一にすること）。
@@ -149,13 +150,14 @@ fun QrDisplayScreen(
 
         Button(
             onClick = { viewModel.startGame() },
-            enabled = uiState.players.size >= 2,
+            enabled = uiState.players.size >= GameLogic.MIN_PLAYERS_TO_START,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
         ) {
             Text(
-                text = if (uiState.players.size < 2) "あと${2 - uiState.players.size}人必要"
+                text = if (uiState.players.size < GameLogic.MIN_PLAYERS_TO_START)
+                    "あと${GameLogic.MIN_PLAYERS_TO_START - uiState.players.size}人必要"
                        else "ゲームを開始する (${uiState.players.size}人)",
                 fontSize = 16.sp,
             )
