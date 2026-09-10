@@ -42,6 +42,8 @@ Issue #37 の起票時点で以下2点は代表の回答待ちだったため、
 | `--color-error-bg` | `#FFEBEE` | エラーメッセージ背景 |
 | `--color-success` | `#388E3C` | 成功・完了メッセージ（回答送信済み等） |
 | `--color-warning` | `#FFA000` | 警告（残り時間わずか）。現状 Android の `CountdownTimer` のみで使用。Web には対応する視覚表示が存在しない（下記画面一覧の備考参照） |
+| `--color-primary-hover` | `#1565C0` | ボタンの hover 背景（Web のみ）。Issue #52 で追加。`--color-primary`（`#1976D2`）を Material Blue 800 相当に1段暗くした値。招待ページで従来使われていたインディゴ由来の `#303f9f` は廃止した。白文字とのコントラスト比は約5.7:1（WCAG AA 通常テキスト基準 4.5:1 を満たす） |
+| `--color-disabled` | `#AAAAAA` | 無効化ボタンの背景（Web のみ）。Issue #52 で追加。既存の `--color-text-faint` と同値だが、テキスト色トークンを背景用途に流用すると意味が合わないため独立したトークンとして新設した |
 
 Android 側の対応（`ui/theme/Theme.kt`）:
 
@@ -88,6 +90,7 @@ Android 側の対応（`ui/theme/Theme.kt`）:
 
 | 画面 | 目的 | Android | Web | 備考 |
 |------|------|---------|-----|------|
+| 招待ページ | 招待URL（`/join/{roomId}`）からのニックネーム入力・ルーム存在確認 | なし | `backend/web/join/index.html` | **Android対応なし**（Android は QR スキャンで直接参加）。`backend/web/index.html` とは別ページ（`showScreen()` のSPA画面切り替え対象外）で、確認後にクエリパラメータ付きでゲーム本体へ遷移する。Issue #52 でカラートークンを `backend/web/index.html` と統一 |
 | ホーム | ニックネーム入力・ルーム作成/参加の起点 | `HomeScreen.kt` | `#screen-home` | Android はルーム作成をダイアログ内で完結（独立画面ではない） |
 | ルーム作成 | ホスト名・質問カテゴリ選択 | `HomeScreen.kt` 内ダイアログ | `#screen-create` | Web は独立画面。Android は同一画面のダイアログ |
 | 招待QR表示 | ルームID・招待QR・招待URLの提示（ホスト） | `QrDisplayScreen.kt` | なし | **Web対応なし**。Web参加者はルームIDを手入力するのみ |
@@ -115,7 +118,9 @@ Android 側の対応（`ui/theme/Theme.kt`）:
 - **カラートークンの正は暫定（Androidの青/オレンジ）**。代表の承認を得るまで確定としない。承認後、本節の「⚠️ 未確定事項」を削除しトークン表を正式版として扱う
 - **回答ボタンの選択状態の見た目を Web 側で変更した**（Issue #37 対応）: 従来 Web は選択中に濃い青 `#0d47a1` ＋淡い青枠 `#82b1ff` を表示していたが、Android の選択状態（`secondary` 色 = オレンジの単色塗り、枠なし）に合わせるため `--color-secondary` の単色塗り・枠なしに変更した。これは配色統一の直接的な帰結であり、画面レイアウト自体の変更ではない
 - Material3 の `error`（実測 `#B3261E`）/ `errorContainer`（実測 `#F9DEDC`）ロールは Compose の既定値のままで、Web の `--color-error`（`#D32F2F`）/ `--color-error-bg`（`#FFEBEE`）とは意図的に一致させていない。Web のエラー配色は Issue #37 以前からの既存デザインをそのまま踏襲したもので、両者を統一するかどうかは次回のトークン整備で検討する
-- `web/public/join/index.html`（招待リンクのランディングページ）には別途ハードコードされた配色が存在するが、Issue #37 の受け入れ基準は `backend/web/index.html` のみを対象としているため、本Issueでは変更していない。将来的に統一が必要であれば別Issueで扱う
+- `backend/web/join/index.html`（招待リンクのランディングページ、旧 `web/public/join/`）は Issue #37 の受け入れ基準の対象外だったため配色が独自（インディゴ系統）のままだったが、Issue #52 で `backend/web/index.html` と同じトークンに統一した
+- **トークン定義の重複方式（Issue #52）**: `backend/web/index.html` と `backend/web/join/index.html` はビルド工程を持たない素の HTML であり、招待ページを独立した1枚のページとして完結させるため、共通 CSS への切り出しは行わず両ファイルにそれぞれ `:root` を定義する方式を採った。値の正本は本ファイルの「カラートークン」表とし、両ファイルの `:root` はそこから転記する。3つ目の HTML が増えた時点で共通 CSS への切り出しを再検討する
+- **招待ページ固有の補助トークン（`--color-success-bg` / `--color-loading-bg`）**: 招待ページには「確認中」「参加登録成功」のメッセージ表示があり、対応する背景色（それぞれ `#E3F2FD` / `#E8F5E9`）が必要だが、`backend/web/index.html` 側に同種のUI要素がなく本表にトークンが存在しない。上記「既存トークンへの置き換えを基本とする」方針の対象外として、招待ページの `:root` のみに局所的なトークンを追加した（本表・`backend/web/index.html` への転記は不要）。ローディングメッセージの文字色は既存の `--color-primary-hover`（`#1565C0`）をそのまま再利用した（招待ページで元々使われていた値と一致するため）
 
 ## 検証（Issue #37）
 
