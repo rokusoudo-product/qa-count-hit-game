@@ -117,6 +117,12 @@
 <div class="container">
   <h1>人数当てゲーム</h1>
 
+  <!-- ルーム・参加者購読（onSnapshot）が失敗した場合のエラー表示（Issue #54）。
+       個々の画面切り替え（.screen）とは独立に、購読が生きている間はどの画面でも
+       表示され得るためコンテナ直下に置く。継続的な接続断の検知・バナーはIssue #51の
+       スコープであり、ここでは購読そのものが落ちた場合の一度きりの通知に限定する。 -->
+  <div id="sync-error" class="error" style="display:none"></div>
+
   <!-- ホーム画面 -->
   <div id="screen-home" class="screen active">
     <!-- 直近参加していたルームへの復帰導線（Issue #49）。playersドキュメントが残っている
@@ -170,6 +176,7 @@
       <div class="question-text" id="answer-question"></div>
     </div>
     <div id="answer-buttons"></div>
+    <div id="answer-error" class="error" style="display:none"></div>
     <div id="answer-sent" class="sent-msg" style="display:none">✓ 回答を送信しました。全員の回答を待っています...</div>
   </div>
 
@@ -181,6 +188,7 @@
     </div>
     <p class="info">どちらの回答を選んだ人が何人いると思いますか？</p>
     <div id="predict-options"></div>
+    <div id="predict-error" class="error" style="display:none"></div>
     <div id="predict-sent" class="sent-msg" style="display:none">✓ 予測を送信しました。全員の回答を待っています...</div>
   </div>
 
@@ -560,6 +568,7 @@
     document.getElementById('host-controls').style.display = state.isHost ? 'block' : 'none';
     document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
     showScreen('waiting');
+    hideError('sync-error');
     startObserving();
     // ホスト端末は観測開始と同時に定期ハートビートの送信を始める（フェーズを問わず、
     // 待合室段階からのホスト離脱も検知できるようにするため）。
@@ -651,6 +660,13 @@
           msg.textContent = `参加者 ${players.length}人`;
           document.getElementById('start-btn').disabled = players.length < 1;
         }
+      },
+      // 購読自体の失敗（権限エラー等）を検知して表示する（Issue #54）。
+      // これが握りつぶされると、以後の「全員提出判定」や参加者一覧が更新されなくなり、
+      // 参加者からは何が起きているか分からないまま止まって見える。
+      err => {
+        console.error('players onSnapshot failed', err);
+        showError('sync-error', '参加者情報の同期に失敗しました。ページを再読み込みしてください');
       }
     );
 
@@ -716,6 +732,13 @@
         document.getElementById('guest-waiting-msg').style.display = state.isHost ? 'none' : 'block';
         showScreen('waiting');
       }
+    },
+    // 購読自体の失敗（権限エラー等）を検知して表示する（Issue #54）。
+    // ルーム状態の購読はフェーズ遷移・タイムアウト監視・ホスト離脱監視の起点であり、
+    // これが握りつぶされるとゲーム進行が静かに止まって見える。
+    err => {
+      console.error('room onSnapshot failed', err);
+      showError('sync-error', 'ルーム情報の同期に失敗しました。ページを再読み込みしてください');
     });
   }
 
@@ -849,33 +872,55 @@
     showScreen('answering');
   }
 
+  // 書き込み（await setDoc）が成功するまでは「送信済み」表示・state.selectedAnswer の
+  // 確定・ボタンの選択状態反映のいずれも行わない（Issue #54）。以前はこれらすべてを
+  // await より前に済ませていたため、オフライン等で書き込みが失敗しても参加者には
+  // 送信できたように見え、かつ selectedAnswer が立ってしまい再送もできなくなっていた。
   async function submitAnswer(answer) {
     if (state.selectedAnswer) return;
-    state.selectedAnswer = answer;
+    hideError('answer-error');
 
-    document.querySelectorAll('.btn-answer').forEach(b => {
-      b.disabled = true;
+    // 二重送信防止のため、書き込みの成否が確定するまでボタンを一時的に無効化する。
+    // 失敗時はここで無効化した分をすべて元に戻す（disabled解除）。
+    const buttons = Array.from(document.querySelectorAll('.btn-answer'));
+    buttons.forEach(b => { b.disabled = true; });
+
+    const roomRef = doc(db, 'rooms', state.roomId);
+    let roomData, currentRound, roundId;
+    try {
+      roomData = (await getDoc(roomRef)).data();
+      currentRound = roomData.currentRound;
+      roundId = roundDocId(roomData.gameCount, currentRound);
+      const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
+      await setDoc(answerRef, { answer, answeredAt: serverTimestamp() });
+    } catch (err) {
+      console.error('submitAnswer failed', err);
+      buttons.forEach(b => { b.disabled = false; });
+      showError('answer-error', '回答の送信に失敗しました。もう一度お試しください');
+      return;
+    }
+
+    // ここまで来て初めて書き込みが成功している。送信済み状態を確定する。
+    state.selectedAnswer = answer;
+    buttons.forEach(b => {
       if (b.textContent === answer) b.classList.add('selected');
     });
     document.getElementById('answer-sent').style.display = 'block';
 
-    const roomRef = doc(db, 'rooms', state.roomId);
-    const roomData = (await getDoc(roomRef)).data();
-    const currentRound = roomData.currentRound;
-    const roundId = roundDocId(roomData.gameCount, currentRound);
-    const roundRef = doc(db, 'rooms', state.roomId, 'rounds', roundId);
-    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
+    // 全員回答したか確認してPREDICTINGへ進める処理はベストエフォート。
+    // 自分の回答自体はすでに確定しているため、ここが失敗しても送信済み表示は戻さない
+    // （取りこぼしてもホストのタイムアウト強制確定 forceAdvanceFromAnswering が拾う）。
+    try {
+      const [players, answers] = await Promise.all([
+        getDocs(collection(db, 'rooms', state.roomId, 'players')),
+        getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
+      ]);
 
-    await setDoc(answerRef, { answer, answeredAt: serverTimestamp() });
-
-    // 全員回答したか確認
-    const [players, answers] = await Promise.all([
-      getDocs(collection(db, 'rooms', state.roomId, 'players')),
-      getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
-    ]);
-
-    if (answers.size >= players.size) {
-      await advanceToPredicting(roomRef, roomData, answers.docs);
+      if (answers.size >= players.size) {
+        await advanceToPredicting(roomRef, roomData, answers.docs);
+      }
+    } catch (err) {
+      console.error('submitAnswer: post-submit advance check failed', err);
     }
   }
 
@@ -937,30 +982,51 @@
     showScreen('predicting');
   }
 
+  // submitAnswer() と同様、書き込み（await updateDoc）が成功するまでは「送信済み」表示・
+  // state.predictionSent の確定を行わない（Issue #54）。
   async function submitPrediction(targetOption, predictedCount) {
     if (state.predictionSent) return;
-    state.predictionSent = true;
+    hideError('predict-error');
 
-    document.getElementById('predict-sent').style.display = 'block';
-    document.querySelectorAll('#predict-options button').forEach(b => b.disabled = true);
+    // 二重送信防止のため、書き込みの成否が確定するまでボタンを一時的に無効化する。
+    // 失敗時はここで無効化した分をすべて元に戻す（disabled解除）。
+    const buttons = Array.from(document.querySelectorAll('#predict-options button'));
+    buttons.forEach(b => { b.disabled = true; });
 
     const roomRef = doc(db, 'rooms', state.roomId);
-    const roomData = (await getDoc(roomRef)).data();
-    const currentRound = roomData.currentRound;
-    const roundId = roundDocId(roomData.gameCount, currentRound);
-    const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
+    let roomData, currentRound, roundId;
+    try {
+      roomData = (await getDoc(roomRef)).data();
+      currentRound = roomData.currentRound;
+      roundId = roundDocId(roomData.gameCount, currentRound);
+      const answerRef = doc(db, 'rooms', state.roomId, 'rounds', roundId, 'answers', state.uid);
+      await updateDoc(answerRef, { prediction: predictedCount, targetOption, predictedAt: serverTimestamp() });
+    } catch (err) {
+      console.error('submitPrediction failed', err);
+      buttons.forEach(b => { b.disabled = false; });
+      showError('predict-error', '予測の送信に失敗しました。もう一度お試しください');
+      return;
+    }
 
-    await updateDoc(answerRef, { prediction: predictedCount, targetOption, predictedAt: serverTimestamp() });
+    // ここまで来て初めて書き込みが成功している。送信済み状態を確定する。
+    state.predictionSent = true;
+    document.getElementById('predict-sent').style.display = 'block';
 
-    // 全員予測したか確認
-    const [players, answers] = await Promise.all([
-      getDocs(collection(db, 'rooms', state.roomId, 'players')),
-      getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
-    ]);
+    // 全員予測したか確認してラウンドを確定する処理はベストエフォート。
+    // 自分の予測自体はすでに確定しているため、ここが失敗しても送信済み表示は戻さない
+    // （取りこぼしてもホストのタイムアウト強制確定 forceFinalizeFromPredicting が拾う）。
+    try {
+      const [players, answers] = await Promise.all([
+        getDocs(collection(db, 'rooms', state.roomId, 'players')),
+        getDocs(collection(db, 'rooms', state.roomId, 'rounds', roundId, 'answers')),
+      ]);
 
-    const predicted = answers.docs.filter(d => d.data().prediction !== undefined);
-    if (predicted.size >= players.size || predicted.length >= players.size) {
-      await finalizeRound(roomRef, roomData, currentRound, answers.docs);
+      const predicted = answers.docs.filter(d => d.data().prediction !== undefined);
+      if (predicted.size >= players.size || predicted.length >= players.size) {
+        await finalizeRound(roomRef, roomData, currentRound, answers.docs);
+      }
+    } catch (err) {
+      console.error('submitPrediction: post-submit finalize check failed', err);
     }
   }
 
