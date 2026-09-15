@@ -121,9 +121,10 @@ npm --prefix rules-tests run test:emulator
 
 `main` 宛の Pull Request と `main` への push で [`.github/workflows/ci.yml`](.github/workflows/ci.yml) が自動実行されます。
 
-- **`android`**（Androidユニットテスト・ビルド。Issue #29）
+- **`android`**（Androidユニットテスト・ビルド。Issue #29 / #46）
   - `./gradlew testDebugUnitTest` — `android/app/src/test/` の `GameLogicTest`（採点ロジック・累計スコア・ラウンドドキュメントIDの純粋関数テスト）
   - `./gradlew assembleDebug` — デバッグAPKのビルド（Kotlinのコンパイルエラーもここで検知）
+  - `./gradlew bundleRelease` — `isMinifyEnabled = true`（R8/ProGuard）のリリースAABビルド。CIには署名鍵を置かないため未署名のまま実行し、R8起因のビルド失敗（keepルール不足等）だけを検知する（Issue #46。詳細は「セットアップ」→「リリースビルド」参照）
   - `google-services.json` は本番のFirebase値を含むため`.gitignore`対象でリポジトリにコミットされていない。CIでは本番値を含まないダミー（`android/app/google-services.ci.json`）を実際のパスへコピーして使う
 - `backend/test_logic.py`（採点ロジック単体テスト。`backend/functions/game_logic.py` の実装を直接importして検証する）
 - `backend/test_questions_sync.py`（質問マスタの正本と3実装の同期検証）
@@ -324,6 +325,66 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 cd android
 ./gradlew testDebugUnitTest
 ```
+
+### リリースビルド（Google Play 提出用 AAB）
+
+Google Play へ提出する成果物は `assembleDebug` の APK ではなく、`isMinifyEnabled = true`
+（R8/ProGuard 有効）のリリースビルドが生成する AAB（Android App Bundle）です（Issue #46）。
+
+```bash
+cd android
+./gradlew bundleRelease
+```
+
+成果物: `android/app/build/outputs/bundle/release/app-release.aab`
+
+**署名鍵の管理方針（Play App Signing 前提）**: このプロジェクトは Play App Signing を使う前提とし、
+開発側が管理するのは Play Console へのアップロード用の「アップロード鍵」のみです。配信用の署名鍵は
+Google 側が保持するため、アップロード鍵を紛失しても Google のリカバリ手続きで配信を継続できます
+（一人法人での運用における鍵紛失リスクの低減）。
+
+**鍵の作り方**（`keytool` は JDK に同梱）:
+
+```bash
+keytool -genkeypair -v -storetype PKCS12 \
+  -keystore /path/to/your.keystore \
+  -alias <your-key-alias> \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+鍵ファイル本体・ストアパスワード・キーパスワード・エイリアス名は代表が管理し、
+**リポジトリにも Issue にもコミットログにも書かないでください**。
+（`PKCS12` 形式では `keytool` の仕様上、ストアパスワードとキーパスワードは同一の値になります）
+
+**`keystore.properties` の書式**（`android/keystore.properties.example` をコピーして作成。
+`.gitignore` 対象なのでコミットされません）:
+
+```properties
+storeFile=/path/to/your.keystore
+storePassword=<ストアパスワード>
+keyAlias=<キーエイリアス>
+keyPassword=<キーパスワード>
+```
+
+`android/keystore.properties` が存在しない場合（CI や、鍵を持たない開発環境）は
+`signingConfig` が設定されず、`bundleRelease` は**未署名のまま成功します**。
+鍵を持たない環境でビルドを壊さないための挙動です。環境変数（`ANDROID_KEYSTORE_PATH` /
+`ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`）からも同じ情報を
+読めるようになっています（現時点では未使用。将来 CI/CD から署名する場合の拡張点で、
+GitHub Secrets に値を設定するだけで有効になります。CI から Play への自動アップロードの予定は
+現時点ではありません）。
+
+**バージョン採番ルール**:
+
+- `versionCode`（`android/app/build.gradle.kts`）: リリースごとに **+1** する。Play は同一
+  `versionCode` の再アップロードを拒否するため、上げ忘れると提出時に必ず失敗する
+- `versionName`: [セマンティックバージョニング](https://semver.org/lang/ja/)（例: `1.0.0` →
+  `1.0.1` / `1.1.0` / `2.0.0`）。現在の `versionName = "1.0"`（`android/app/build.gradle.kts`）は
+  このルール導入前の値のため未対応。初回リリース時に `1.0.0` へ揃えてください
+
+CI（`.github/workflows/ci.yml` の `android` ジョブ）では、署名鍵を置かずに
+`./gradlew bundleRelease` を実行し、R8 を通るビルドが PR ごとに成功することだけを検証しています
+（Play への提出は代表が手元の署名鍵付き環境で行う想定）。
 
 ### Webクライアント
 

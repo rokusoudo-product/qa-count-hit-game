@@ -63,6 +63,14 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
+      # isMinifyEnabled = true（R8/ProGuard）を通るビルドをPRごとに1回はコンパイルする（Issue #46）。
+      # CIには署名鍵を置かない前提のため、android/keystore.properties が存在せず環境変数も
+      # 未設定となり、signingConfigが未設定のまま未署名でビルドされる（build.gradle.kts参照）。
+      # ここではR8を通してビルドが成功すること・keepルール不足によるビルド失敗がないことのみを検証する。
+      - name: Build release AAB (bundleRelease, unsigned)
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+
   logic-tests:
     name: ロジック単体テスト
     runs-on: ubuntu-latest
