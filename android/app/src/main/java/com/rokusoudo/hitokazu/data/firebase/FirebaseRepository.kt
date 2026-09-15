@@ -126,7 +126,7 @@ class FirebaseRepository {
         if (roomData["status"] != "WAITING") error("ゲームはすでに開始されています")
 
         val players = roomRef.collection("players").get().await()
-        if (players.size() >= 20) error("ルームが満員です")
+        if (players.size() >= GameLogic.MAX_PLAYERS_PER_ROOM) error("ルームが満員です")
 
         playerRef.set(
             mapOf(
