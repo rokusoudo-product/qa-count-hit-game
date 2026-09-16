@@ -21,10 +21,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # compileSdk 35 / build-tools 等、プロジェクトが要求するSDKコンポーネントを
-      # 用意し、ライセンスを事前承諾する（Gradle実行時の対話プロンプトを避ける）。
+      # Android SDK のライセンスを事前承諾し、platform-tools を用意する
+      # （Gradle実行時の対話プロンプトを避ける）。compileSdk 35 / build-tools は
+      # ubuntu-latest ランナーイメージ同梱のものと AGP の自動取得で賄われる。
+      #
+      # packages を明示するのは、このactionの既定値 'tools platform-tools' に含まれる
+      # レガシーの `tools` パッケージを Google が 2026-09-15 に配信停止したため。
+      # 既定のままだと `Warning: Failed to find package 'tools'` で sdkmanager が
+      # exit 1 となり、テスト実行前のSDKセットアップ段階でAndroidジョブが落ちる。
+      # 上流は未修正（android-actions/setup-android#537）で、v4 の既定値にも 'tools'
+      # が残っているため、バージョンを上げるだけでは直らない。
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       # google-services.json は Firebase の本番値を含むため .gitignore 対象で、
       # リポジトリにはコミットされていない。CI専用のダミー（本番値を含まない
