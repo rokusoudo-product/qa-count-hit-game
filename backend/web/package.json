@@ -1,0 +1,10 @@
+{
+  "name": "hitokazu-web-logic-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "backend/web/game_logic.js（Firestoreに依存しないゲームロジック）のユニットテスト（Issue #45）",
+  "type": "module",
+  "scripts": {
+    "test": "node --test game_logic.test.mjs"
+  }
+}

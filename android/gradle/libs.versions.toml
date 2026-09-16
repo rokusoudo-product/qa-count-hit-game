@@ -13,6 +13,7 @@ coroutines = "1.8.1"
 zxing = "3.5.3"
 zxingAndroidEmbedded = "4.3.0"
 junit = "4.13.2"
+json = "20240303"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -36,6 +37,10 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version = "4.12.0" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# JVMユニットテストから shared/logic_vectors.json（採点ロジックの期待値の単一正本。Issue #45）を
+# パースするために使う。android.jar の org.json はJVMユニットテストではスタブ（メソッド呼び出しで
+# 例外を投げる）のため、testImplementation として本物の org.json:json を追加する。
+org-json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
