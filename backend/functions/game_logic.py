@@ -55,6 +55,26 @@ def finalize_scores(
     return sorted(results, key=lambda x: x["roundScore"], reverse=True)
 
 
+def compute_cumulative_totals(
+    previous_totals: dict[str, int],
+    round_results: list[dict],
+) -> dict[str, int]:
+    """ラウンド確定後の cumulativeTotals を計算する。今回のラウンドで提出しなかった
+    プレイヤーは、前回までの累計を持っていても新しい cumulativeTotals にエントリを
+    残さない（Web `finalizeRound` / Android `FirebaseRepository.finalizeRound` と
+    同一仕様。Issue #27・#45）。round_results の要素は {"playerId": ..., "roundScore": ...}。
+    """
+    new_totals: dict[str, int] = {}
+    for r in round_results:
+        new_totals[r["playerId"]] = cumulative_total(previous_totals.get(r["playerId"], 0), r["roundScore"])
+    return new_totals
+
+
+def sort_by_total_desc(scores: list[dict]) -> list[dict]:
+    """最終順位: totalScore の降順（同点は元の順序を保つ安定ソート。Python の sorted は安定）。"""
+    return sorted(scores, key=lambda s: s["totalScore"], reverse=True)
+
+
 # ─── ルームID生成（Android FirebaseRepository.generateRoomId と同一の文字集合） ──
 ROOM_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 紛らわしい文字（O, I, 0, 1）を除く
 

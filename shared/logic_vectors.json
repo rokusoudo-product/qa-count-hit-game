@@ -1,0 +1,104 @@
+{
+  "calculateScore": [
+    { "actual": 5, "predicted": 5, "expected": 100, "label": "差0（ぴったり）" },
+    { "actual": 5, "predicted": 4, "expected": 80, "label": "差1" },
+    { "actual": 5, "predicted": 3, "expected": 60, "label": "差2" },
+    { "actual": 5, "predicted": 2, "expected": 40, "label": "差3" },
+    { "actual": 5, "predicted": 1, "expected": 20, "label": "差4" },
+    { "actual": 5, "predicted": 0, "expected": 0, "label": "差5（0点に張り付く）" },
+    { "actual": 5, "predicted": 6, "expected": 80, "label": "オーバー差1（絶対値なので対称）" },
+    { "actual": 5, "predicted": 10, "expected": 0, "label": "オーバー差5" },
+    { "actual": 5, "predicted": 11, "expected": 0, "label": "差6以上（0点に張り付いたまま）" },
+    { "actual": 0, "predicted": 0, "expected": 100, "label": "0人ぴったり" },
+    { "actual": 0, "predicted": 1, "expected": 80, "label": "0人に対し1予測" },
+    { "actual": 0, "predicted": 5, "expected": 0, "label": "0人に対し5予測（差5）" },
+    { "actual": 20, "predicted": 16, "expected": 20, "label": "境界: 差4はまだ0点にならない" },
+    { "actual": 20, "predicted": 15, "expected": 0, "label": "境界: 差5でちょうど0点になる" }
+  ],
+  "cumulativeTotal": [
+    { "previousTotal": 100, "roundScore": 80, "expected": 180, "label": "通常の加算" },
+    { "previousTotal": 0, "roundScore": 100, "expected": 100, "label": "初回ラウンド（累計0からの加算）" },
+    { "previousTotal": 200, "roundScore": 0, "expected": 200, "label": "このラウンドが0点でも累計は減らない" },
+    { "previousTotal": 480, "roundScore": 20, "expected": 500, "label": "境界: 5ラウンド満点の最終加算と同じ値" }
+  ],
+  "countAnswers": [
+    {
+      "answers": ["はい", "いいえ", "はい", "はい", "いいえ"],
+      "options": ["はい", "いいえ"],
+      "expected": { "はい": 3, "いいえ": 2 },
+      "label": "3対2の分布"
+    },
+    {
+      "answers": ["はい", "はい", "はい", "はい"],
+      "options": ["はい", "いいえ"],
+      "expected": { "はい": 4, "いいえ": 0 },
+      "label": "全員はい（0人側も0として出力される）"
+    },
+    {
+      "answers": ["はい", "はい", "はい", "はい", "はい", "はい", "はい", "はい", "はい", "はい", "はい", "はい", "いいえ", "いいえ", "いいえ", "いいえ", "いいえ", "いいえ", "いいえ", "いいえ"],
+      "options": ["はい", "いいえ"],
+      "expected": { "はい": 12, "いいえ": 8 },
+      "label": "20人（最大プレイヤー数）の集計"
+    }
+  ],
+  "finalizeRoundScores": [
+    {
+      "label": "4人・同点タイの並び順は元の順序を保つ（安定ソート）",
+      "predictions": [
+        { "playerId": "A", "targetOption": "はい", "predictedCount": 3 },
+        { "playerId": "B", "targetOption": "はい", "predictedCount": 2 },
+        { "playerId": "C", "targetOption": "いいえ", "predictedCount": 1 },
+        { "playerId": "D", "targetOption": "はい", "predictedCount": 1 }
+      ],
+      "answerCounts": { "はい": 3, "いいえ": 1 },
+      "expected": [
+        { "playerId": "A", "actualCount": 3, "roundScore": 100 },
+        { "playerId": "C", "actualCount": 1, "roundScore": 100 },
+        { "playerId": "B", "actualCount": 3, "roundScore": 80 },
+        { "playerId": "D", "actualCount": 3, "roundScore": 60 }
+      ]
+    }
+  ],
+  "cumulativeTotalsAfterRound": [
+    {
+      "label": "前回まで累計を持っていても今回未提出なら新しいcumulativeTotalsにエントリを残さない（Issue #27）",
+      "previousTotals": { "A": 100, "B": 80, "E": 50 },
+      "roundResults": [
+        { "playerId": "A", "roundScore": 100 },
+        { "playerId": "B", "roundScore": 80 },
+        { "playerId": "C", "roundScore": 60 }
+      ],
+      "expected": { "A": 200, "B": 160, "C": 60 }
+    },
+    {
+      "label": "初回ラウンド（前回の累計が空）",
+      "previousTotals": {},
+      "roundResults": [
+        { "playerId": "X", "roundScore": 40 }
+      ],
+      "expected": { "X": 40 }
+    }
+  ],
+  "sortFinalScoresByTotal": [
+    {
+      "label": "totalScore降順・同点は元の順序を保つ（安定ソート）",
+      "scores": [
+        { "playerId": "A", "totalScore": 200 },
+        { "playerId": "B", "totalScore": 160 },
+        { "playerId": "C", "totalScore": 200 },
+        { "playerId": "D", "totalScore": 60 }
+      ],
+      "expectedOrder": ["A", "C", "B", "D"]
+    }
+  ],
+  "roundDocId": [
+    { "gameCount": 1, "round": 1, "expected": "1_1" },
+    { "gameCount": 2, "round": 1, "expected": "2_1" },
+    { "gameCount": 1, "round": 3, "expected": "1_3" },
+    { "gameCount": 2, "round": 3, "expected": "2_3" }
+  ],
+  "expireAtAfterHours": [
+    { "hours": 6, "nowMs": 1700000000000, "expectedMs": 1700021600000, "label": "待機・ラウンド確定時の保持期限（6時間）" },
+    { "hours": 24, "nowMs": 1700000000000, "expectedMs": 1700086400000, "label": "終了後の保持期限（24時間）" }
+  ]
+}

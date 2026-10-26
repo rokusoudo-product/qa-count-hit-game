@@ -1,112 +1,82 @@
 package com.rokusoudo.hitokazu.game
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
- * [GameLogic] のユニットテスト（Issue #29）。
+ * [GameLogic] のユニットテスト（Issue #29 / #45）。
  *
- * Firestoreに依存しない純粋関数のみを対象とし、`./gradlew testDebugUnitTest` で
- * Android SDK・エミュレータなしに実行できる。ケースは backend/test_logic.py の
- * TEST 1（採点ロジック）・TEST 8（累計スコア）と同一のものを最低限含める。
+ * 採点・累計スコア・ラウンドドキュメントIDの期待値は `shared/logic_vectors.json`
+ * （Kotlin/JavaScript/Pythonの単一正本。Issue #45）から読み込み、このファイル内には
+ * 期待値をハードコードしない。ケースを追加・変更したいときは shared/logic_vectors.json を
+ * 編集する（このファイルではなく、そちらが正）。
+ *
+ * Gradle タスク `copyLogicVectors`（app/build.gradle.kts）が `shared/logic_vectors.json` を
+ * `src/test/resources/` へコピーし、`testDebugUnitTest` 等の実行前に必ず走るようにしてある。
+ * テストコードからは相対パスで直接読まず classpath リソースとして読む。Gradle のテスト実行時
+ * カレントディレクトリは環境によって変わり得るため、CIで確実に動く方（リソース経由）を選んだ
+ * （Issue #45 の未解決の質問への回答）。
  */
 class GameLogicTest {
+
+    private fun loadVectors(): JSONObject {
+        val stream = javaClass.classLoader?.getResourceAsStream("logic_vectors.json")
+            ?: error(
+                "logic_vectors.json (test resource) が見つかりません。" +
+                    "copyLogicVectors タスクが実行されているか確認してください " +
+                    "(通常は ./gradlew testDebugUnitTest の依存関係として自動実行されます)。"
+            )
+        return JSONObject(stream.bufferedReader(Charsets.UTF_8).readText())
+    }
 
     // ── 採点ロジック: score = max(0, 100 - |predicted - actual| × 20) ──
 
     @Test
-    fun calculateScore_exactMatch_returns100() {
-        assertEquals(100, GameLogic.calculateScore(actual = 5, predicted = 5))
-    }
-
-    @Test
-    fun calculateScore_offByOne_returns80() {
-        assertEquals(80, GameLogic.calculateScore(actual = 5, predicted = 4))
-    }
-
-    @Test
-    fun calculateScore_offByTwo_returns60() {
-        assertEquals(60, GameLogic.calculateScore(actual = 5, predicted = 3))
-    }
-
-    @Test
-    fun calculateScore_offByThree_returns40() {
-        assertEquals(40, GameLogic.calculateScore(actual = 5, predicted = 2))
-    }
-
-    @Test
-    fun calculateScore_offByFour_returns20() {
-        assertEquals(20, GameLogic.calculateScore(actual = 5, predicted = 1))
-    }
-
-    @Test
-    fun calculateScore_offByFive_clampsToZero() {
-        assertEquals(0, GameLogic.calculateScore(actual = 5, predicted = 0))
-    }
-
-    @Test
-    fun calculateScore_overPrediction_isSymmetric() {
-        // 差の絶対値なので、予測が実際より多くても同じ点数になる
-        assertEquals(80, GameLogic.calculateScore(actual = 5, predicted = 6))
-    }
-
-    @Test
-    fun calculateScore_farOverPrediction_clampsToZero() {
-        assertEquals(0, GameLogic.calculateScore(actual = 5, predicted = 10))
-    }
-
-    @Test
-    fun calculateScore_zeroActualExactMatch_returns100() {
-        assertEquals(100, GameLogic.calculateScore(actual = 0, predicted = 0))
-    }
-
-    @Test
-    fun calculateScore_zeroActualOffByOne_returns80() {
-        assertEquals(80, GameLogic.calculateScore(actual = 0, predicted = 1))
-    }
-
-    @Test
-    fun calculateScore_zeroActualFarOff_clampsToZero() {
-        assertEquals(0, GameLogic.calculateScore(actual = 0, predicted = 5))
-    }
-
-    @Test
-    fun calculateScore_boundaryJustAboveZero_isOnePoint() {
-        // 差4.99... ではなく整数なので、差4がスコア0にならない境界（20点）を確認する
-        assertEquals(20, GameLogic.calculateScore(actual = 20, predicted = 16))
-    }
-
-    @Test
-    fun calculateScore_boundaryExactlyZero_atDiffFive() {
-        // 差5でちょうど0点（max(0, 0)）になる境界
-        assertEquals(0, GameLogic.calculateScore(actual = 20, predicted = 15))
+    fun calculateScore_matchesSharedVectors() {
+        val cases = loadVectors().getJSONArray("calculateScore")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val actual = c.getInt("actual")
+            val predicted = c.getInt("predicted")
+            val expected = c.getInt("expected")
+            assertEquals(
+                "calculateScore(actual=$actual, predicted=$predicted) [${c.optString("label")}]",
+                expected,
+                GameLogic.calculateScore(actual = actual, predicted = predicted),
+            )
+        }
     }
 
     // ── 累計スコアの加算 ──────────────────────────────────────
 
     @Test
-    fun cumulativeTotal_addsRoundScoreToPreviousTotal() {
-        assertEquals(180, GameLogic.cumulativeTotal(previousTotal = 100, roundScore = 80))
+    fun cumulativeTotal_matchesSharedVectors() {
+        val cases = loadVectors().getJSONArray("cumulativeTotal")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val previousTotal = c.getInt("previousTotal")
+            val roundScore = c.getInt("roundScore")
+            val expected = c.getInt("expected")
+            assertEquals(
+                "cumulativeTotal(previousTotal=$previousTotal, roundScore=$roundScore) [${c.optString("label")}]",
+                expected,
+                GameLogic.cumulativeTotal(previousTotal = previousTotal, roundScore = roundScore),
+            )
+        }
     }
 
     @Test
-    fun cumulativeTotal_firstRound_startsFromZero() {
-        assertEquals(100, GameLogic.cumulativeTotal(previousTotal = 0, roundScore = 100))
-    }
-
-    @Test
-    fun cumulativeTotal_roundScoreZero_keepsPreviousTotal() {
-        assertEquals(200, GameLogic.cumulativeTotal(previousTotal = 200, roundScore = 0))
-    }
-
-    @Test
-    fun cumulativeTotal_fiveRoundsPerfectScore_accumulatesTo500() {
+    fun cumulativeTotal_fiveRoundsPerfectScore_matchesPerfectRoundScoreTimesFive() {
+        // 5ラウンド満点の累計は「1ラウンド分のスコア×5」と一致するはず（期待値を数値で
+        // ハードコードせず、calculateScore/cumulativeTotalの合成から導出する）。
+        val perfectRoundScore = GameLogic.calculateScore(actual = 3, predicted = 3)
         var total = 0
         repeat(5) {
-            val roundScore = GameLogic.calculateScore(actual = 3, predicted = 3)
-            total = GameLogic.cumulativeTotal(total, roundScore)
+            total = GameLogic.cumulativeTotal(total, perfectRoundScore)
         }
-        assertEquals(500, total)
+        assertEquals(perfectRoundScore * 5, total)
     }
 
     @Test
@@ -120,15 +90,25 @@ class GameLogicTest {
     // ── ラウンドドキュメントID ────────────────────────────────
 
     @Test
-    fun roundDocId_formatsAsGameCountUnderscoreRound() {
-        assertEquals("1_1", GameLogic.roundDocId(gameCount = 1L, round = 1))
-        assertEquals("2_1", GameLogic.roundDocId(gameCount = 2L, round = 1))
+    fun roundDocId_matchesSharedVectors() {
+        val cases = loadVectors().getJSONArray("roundDocId")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val gameCount = c.getLong("gameCount")
+            val round = c.getInt("round")
+            val expected = c.getString("expected")
+            assertEquals(
+                "roundDocId(gameCount=$gameCount, round=$round)",
+                expected,
+                GameLogic.roundDocId(gameCount = gameCount, round = round),
+            )
+        }
     }
 
     @Test
     fun roundDocId_differsAcrossGameCounts_forSameRound() {
         val first = GameLogic.roundDocId(gameCount = 1L, round = 3)
         val second = GameLogic.roundDocId(gameCount = 2L, round = 3)
-        assert(first != second) { "同じroundでもgameCountが違えば別IDになるべき: $first vs $second" }
+        assertNotEquals("同じroundでもgameCountが違えば別IDになるべき: $first vs $second", first, second)
     }
 }
